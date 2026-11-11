@@ -61,7 +61,7 @@ async function main() {
     console.log(`Allowance is already ${target} atomic units. No transaction submitted.`)
     return
   }
-  if (action === 'approve' && currentAllowance !== 0n) throw new Error('Existing allowance is nonzero. Run npm run permit2:revoke before setting a new allowance.')
+  if (action === 'approve' && currentAllowance !== 0n) throw new Error('Existing allowance is nonzero. Run npm run charge:revoke before setting a new allowance.')
   console.log(`Setting USDT allowance: owner=${toBase58Address(payer)} spender=${toBase58Address(permit2.address)} amountAtomic=${target}`)
   const hash = await transport.send(config.tokenAddress, encodeFunctionData({ abi, functionName: 'approve', args: [permit2.address, target] }))
   console.log(`Approval transaction: ${hash}`)

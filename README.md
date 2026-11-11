@@ -50,9 +50,9 @@ configuration rather than automatic node-network discovery.
 
 ```sh
 # Terminal 1
-npm run server
+npm run charge:server
 # Terminal 2
-npm run client
+npm run charge:client
 ```
 
 The flow is HTTP 402 -> charge credential -> server broadcast -> confirmed
@@ -60,7 +60,7 @@ receipt -> HTTP 200 with `Payment-Receipt`. The app advertises exactly the
 credential selected by `CHARGE_CREDENTIAL_TYPE` (`transaction` by default).
 EIP-3009 and escrow contracts are not used.
 
-With the server still running, `npm run replay` performs one token payment and
+With the server still running, `npm run charge:replay` performs one token payment and
 submits its credential twice. The replay must return 402 without another
 broadcast or access to the handler. Both `client` and `replay` can submit a real
 Nile token transfer. They are separate payment runs.
@@ -98,37 +98,37 @@ https://docs.sun.io/protocols/sunswap-v4/reference/contract/
 
 3. Run `npm run check` and `npm test`. These checks spend no funds.
 
-4. Run `npm run permit2:inspect`. It reads balances, the USDT allowance to
+4. Run `npm run charge:inspect`. It reads balances, the USDT allowance to
    Permit2, `nonceBitmap`, and `DOMAIN_SEPARATOR`. Expect `domainMatchesSdk: true`,
    USDT with six decimals, and `balanceCoversClientCap: true`. An initial zero
    allowance is expected. This command does not sign or broadcast.
 
-5. Run `npm run permit2:approve`. This sends a payer transaction to the USDT
+5. Run `npm run charge:approve`. This sends a payer transaction to the USDT
    contract, setting its allowance to the Permit2 contract to exactly
    `MAX_PAYMENT_AMOUNT_ATOMIC`. With the settings above that is one USDT.
    Wait for `Confirmed allowance: 1000000 atomic units`, then rerun
-   `npm run permit2:inspect`; `allowanceCoversClientCap` should be true.
+   `npm run charge:inspect`; `allowanceCoversClientCap` should be true.
    Approval itself transfers no tokens. A different nonzero existing allowance
-   must first be cleared with `npm run permit2:revoke`.
+   must first be cleared with `npm run charge:revoke`.
 
-6. Stop any older server using the configured port. Start `npm run server` in
+6. Stop any older server using the configured port. Start `npm run charge:server` in
    terminal 1. Expect `Charge credential: permit2` and the correct Permit2 and
    relayer addresses. This harness keeps its payment journal in memory, so keep
    this server running while a submission is pending.
 
-7. In terminal 2, run `npm run challenge`. It requires HTTP 402, method `tron`,
+7. In terminal 2, run `npm run charge:challenge`. It requires HTTP 402, method `tron`,
    intent `charge`, the configured token/recipient/Nile chain, and exactly
    `credentialTypes: ["permit2"]`. It also checks the Permit2 and spender
    addresses. It prints the challenge without signing or paying. SDK challenge
    addresses are normalized to `0x` format; they represent the same TRON accounts.
 
-8. Run `npm run client` once. The payer signs a short-lived witness permit
+8. Run `npm run charge:client` once. The payer signs a short-lived witness permit
    off-chain; the server relayer simulates and submits
    `permitWitnessTransferFrom`, then confirms the USDT Transfer event. Expect
    `Charge credential: permit2`, HTTP 200, a `Payment-Receipt`, and a confirmed
    transaction hash. This is one live charge and transfers one USDT.
 
-9. Run `npm run permit2:inspect` again. Compare with step 4: payer balance falls
+9. Run `npm run charge:inspect` again. Compare with step 4: payer balance falls
    by `1000000` atomic units and recipient balance rises by `1000000` when they
    are different wallets. The exact one-USDT approval is normally consumed.
    Open the printed charge hash at
@@ -136,18 +136,18 @@ https://docs.sun.io/protocols/sunswap-v4/reference/contract/
    as transaction sender, Permit2 as the called contract, and a USDT Transfer
    from payer to merchant.
 
-10. Optional replay test: approve another one USDT, then run `npm run replay`.
+10. Optional replay test: approve another one USDT, then run `npm run charge:replay`.
     This makes a separate charge, submits the same credential twice, and expects
     `First submission: 200` followed by `Replay submission: 402`. Only its first
-    submission should transfer tokens. Use `npm run permit2:revoke` to clear any
+    submission should transfer tokens. Use `npm run charge:revoke` to clear any
     remaining token allowance after testing.
 
 If a charge returns 503 or its submission result is uncertain, keep the server
 running and investigate the original transaction before starting another charge.
-`npm run client` creates a fresh payment credential on each invocation.
+`npm run charge:client` creates a fresh payment credential on each invocation.
 
 The earlier live transaction-credential test does not validate Permit2 settlement.
-Permit2 setup inspection is read-only; a successful `npm run client` in Permit2
+Permit2 setup inspection is read-only; a successful `npm run charge:client` in Permit2
 mode is the live end-to-end settlement check.
 
 ## Automated checks
