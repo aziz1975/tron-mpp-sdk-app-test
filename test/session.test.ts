@@ -80,7 +80,8 @@ test('standalone Permit2 top-ups preserve forced close and withdrawal waits for 
   f.flags.now += 900n
   await f.client.force('withdraw')
   assert.equal((await f.client.operator('reconcile', f.serverConfig.mppSecretKey)).status, 200)
-  assert.equal((await f.manager.state(id))!.closed, true)
+  // The built-in adapter has no confirmed channel snapshot for external withdrawals.
+  assert.equal((await f.manager.state(id))!.closed, false)
   assert.equal(f.balances().payer, 1000n)
   assert.equal(f.balances().escrow, 0n)
 })
@@ -140,6 +141,9 @@ test('uncertain close reconciles without another close transaction and permits a
   assert.equal((await f.client.execute('close')).status, 503)
   assert.equal(f.client.pending, true)
   assert.equal(f.counters.close, 1)
+  assert.equal((await f.client.operator('reconcile', f.serverConfig.mppSecretKey)).status, 200)
+  assert.equal(f.client.pending, true)
+  assert.equal((await f.manager.state(original!))!.closed, false)
   f.flags.pending = false
   assert.equal((await f.client.operator('reconcile', f.serverConfig.mppSecretKey)).status, 200)
   assert.equal(f.client.pending, false)

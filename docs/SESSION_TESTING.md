@@ -161,7 +161,9 @@ npm run session:reconcile
 ```
 
 For a saved funding credential, this calls the SDK's `reconcileFunding`; otherwise
-it reconciles settlement/close or forced finalization. Reconciliation does not
+it reconciles known settlement/close transactions once they reach `MIN_CONFIRMATIONS`.
+HTTP 200 means the state was inspected; check `state.operation` and `state.closed`
+to see whether an operation has actually resolved. Reconciliation does not
 broadcast or deliver service. For an uncertain paid GET, successful reconciliation
 acknowledges the saved service attempt and clears it after returning the current
 accounting; it does not recover or redeliver the response. A subsequent paid command
@@ -169,7 +171,10 @@ is a new billable request. A successful funding reconciliation can still need
 `session:retry` to initialize accounting or accept the voucher. Confirmed close
 or settlement failures release the SDK's operation reservation. Hashless unknown
 submissions require checking the submitting account's transactions; do not delete
-the journals to force another payment. New successful signed requests are new
+the journals to force another payment. The built-in adapter cannot reconcile a
+hashless operation or external forced withdrawal from a confirmed channel snapshot.
+That requires a custom adapter implementing `confirmedChannel` at the configured
+confirmation depth. New successful signed requests are new
 billable requests; handler responses are not cached for business retries.
 
 The file store is for this local single-process harness. A production deployment
@@ -185,10 +190,12 @@ npm run session:request-close
 npm run session:inspect
 # Wait for the escrow's reported grace period (at least 900 seconds).
 npm run session:withdraw
-# With the server running, synchronize the server's closed tombstone:
+# Inspect server accounting (the built-in adapter cannot confirm external withdrawal):
 npm run session:reconcile
 ```
 
+The built-in adapter leaves the server tombstone open after an external withdrawal;
+automatic tombstone synchronization requires a custom `confirmedChannel` adapter.
 The payer pays resources for these transactions. Withdraw is simulated first, so
 an unelapsed grace period is rejected before broadcast. During the wait, a
 standalone `session:topup` is permitted and preserves the close deadline;

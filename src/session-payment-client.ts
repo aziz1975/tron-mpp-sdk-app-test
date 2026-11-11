@@ -79,7 +79,7 @@ export class SessionTestClient {
     const httpMethod = action === 'voucher' || action === 'merge' ? 'HEAD' : action === 'pay' || action === 'stream' ? 'GET' : 'POST'
     const challenge = await this.challenge(httpMethod)
     await inspectEscrow(c, this.transport)
-    const method = tron.session({ chainIds: [c.chainId], currencies: [c.tokenAddress], escrowContracts: [c.escrowAddress], payer: c.payer,
+    const method = tron.session({ chainIds: [c.chainId], currencies: [c.tokenAddress], escrowContracts: [c.escrowAddress], recipients: [c.recipientAddress], payer: c.payer,
       maxUnitAmount: c.unitAmount, maxCumulativeAmount: c.maxCumulative, wallet: this.wallet,
       preparePayment: async () => {
         if (action === 'open') {
