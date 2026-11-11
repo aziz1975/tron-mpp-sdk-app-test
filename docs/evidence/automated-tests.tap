@@ -1,0 +1,257 @@
+
+> tron-mpp-sdk-app-test@0.1.0 test
+> node --import tsx --test test/*.test.ts
+
+TAP version 13
+# Subtest: application HTTP integration
+    # Subtest: health, routing and atomic challenge
+    ok 1 - health, routing and atomic challenge
+      ---
+      duration_ms: 108.899096
+      type: 'test'
+      ...
+    # Subtest: automatic paid fetch returns protected content and receipt
+    ok 2 - automatic paid fetch returns protected content and receipt
+      ---
+      duration_ms: 147.422
+      type: 'test'
+      ...
+    # Subtest: sequential and concurrent credential replay
+    ok 3 - sequential and concurrent credential replay
+      ---
+      duration_ms: 78.499231
+      type: 'test'
+      ...
+    # Subtest: two payments for one challenge allow only one success
+    ok 4 - two payments for one challenge allow only one success
+      ---
+      duration_ms: 92.707883
+      type: 'test'
+      ...
+    # Subtest: same transaction signed against fresh challenge is rejected
+    ok 5 - same transaction signed against fresh challenge is rejected
+      ---
+      duration_ms: 117.063177
+      type: 'test'
+      ...
+    # Subtest: rejects missing signature without consuming valid credential
+    ok 6 - rejects missing signature without consuming valid credential
+      ---
+      duration_ms: 80.679723
+      type: 'test'
+      ...
+    # Subtest: rejects wrong signature without consuming valid credential
+    ok 7 - rejects wrong signature without consuming valid credential
+      ---
+      duration_ms: 94.07296
+      type: 'test'
+      ...
+    # Subtest: rejects changed tx without consuming valid credential
+    ok 8 - rejects changed tx without consuming valid credential
+      ---
+      duration_ms: 119.745608
+      type: 'test'
+      ...
+    # Subtest: rejects changed amount without consuming valid credential
+    ok 9 - rejects changed amount without consuming valid credential
+      ---
+      duration_ms: 69.682691
+      type: 'test'
+      ...
+    # Subtest: rejects changed source without consuming valid credential
+    ok 10 - rejects changed source without consuming valid credential
+      ---
+      duration_ms: 96.389524
+      type: 'test'
+      ...
+    # Subtest: rejects changed challenge without consuming valid credential
+    ok 11 - rejects changed challenge without consuming valid credential
+      ---
+      duration_ms: 34.292511
+      type: 'test'
+      ...
+    # Subtest: malformed authorization rejects
+    ok 12 - malformed authorization rejects
+      ---
+      duration_ms: 9.461513
+      type: 'test'
+      ...
+    # Subtest: rejects failure; permits retry after recovery
+    ok 13 - rejects failure; permits retry after recovery
+      ---
+      duration_ms: 47.070214
+      type: 'test'
+      ...
+    # Subtest: rejects pending; permits retry after recovery
+    ok 14 - rejects pending; permits retry after recovery
+      ---
+      duration_ms: 44.613119
+      type: 'test'
+      ...
+    # Subtest: rejects wrongAmount; permits retry after recovery
+    ok 15 - rejects wrongAmount; permits retry after recovery
+      ---
+      duration_ms: 38.100511
+      type: 'test'
+      ...
+    # Subtest: rejects wrongRecipient; permits retry after recovery
+    ok 16 - rejects wrongRecipient; permits retry after recovery
+      ---
+      duration_ms: 47.413453
+      type: 'test'
+      ...
+    # Subtest: rejects wrongPayer; permits retry after recovery
+    ok 17 - rejects wrongPayer; permits retry after recovery
+      ---
+      duration_ms: 38.0437
+      type: 'test'
+      ...
+# mppx: internal verification error Error: simulated RPC outage
+#     at Object.getTransaction (/home/aziz/localrepos/blockchain-projects/tron-mpp-sdk-app-test/test/app.test.ts:44:31)
+#     at Object.verifier (/home/aziz/localrepos/blockchain-projects/tron-mpp-sdk/src/tronweb/index.ts:104:19)
+#     at verify (/home/aziz/localrepos/blockchain-projects/tron-mpp-sdk/src/server/Charge.ts:47:41)
+#     at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+#     at async handler (/home/aziz/localrepos/blockchain-projects/tron-mpp-sdk/node_modules/mppx/dist/server/Mppx.js:855:31)
+#     at async <anonymous> (/home/aziz/localrepos/blockchain-projects/tron-mpp-sdk/node_modules/mppx/dist/server/Mppx.js:2010:22)
+#     at async Server.<anonymous> (/home/aziz/localrepos/blockchain-projects/tron-mpp-sdk-app-test/src/app.ts:52:22)
+    # Subtest: rejects rpcFailure; permits retry after recovery
+    ok 18 - rejects rpcFailure; permits retry after recovery
+      ---
+      duration_ms: 32.636392
+      type: 'test'
+      ...
+    # Subtest: rejects confirmations; permits retry after recovery
+    ok 19 - rejects confirmations; permits retry after recovery
+      ---
+      duration_ms: 43.212321
+      type: 'test'
+      ...
+    1..19
+ok 1 - application HTTP integration
+  ---
+  duration_ms: 1352.829696
+  type: 'test'
+  ...
+# Subtest: client refuses over-limit charge before broadcast
+ok 2 - client refuses over-limit charge before broadcast
+  ---
+  duration_ms: 7.678397
+  type: 'test'
+  ...
+# Subtest: adapter refuses wrong network before broadcast
+ok 3 - adapter refuses wrong network before broadcast
+  ---
+  duration_ms: 16.988496
+  type: 'test'
+  ...
+# Subtest: configuration rejects invalid amounts and ports
+ok 4 - configuration rejects invalid amounts and ports
+  ---
+  duration_ms: 0.755561
+  type: 'test'
+  ...
+# Subtest: client policy blocks network before signer
+ok 5 - client policy blocks network before signer
+  ---
+  duration_ms: 10.06672
+  type: 'test'
+  ...
+# Subtest: client policy blocks currency before signer
+ok 6 - client policy blocks currency before signer
+  ---
+  duration_ms: 0.339909
+  type: 'test'
+  ...
+# Subtest: client policy blocks native decimals before signer
+ok 7 - client policy blocks native decimals before signer
+  ---
+  duration_ms: 2.582008
+  type: 'test'
+  ...
+# Subtest: client policy blocks atomic cap before signer
+ok 8 - client policy blocks atomic cap before signer
+  ---
+  duration_ms: 0.20131
+  type: 'test'
+  ...
+# Subtest: client policy blocks token decimals missing before signer
+ok 9 - client policy blocks token decimals missing before signer
+  ---
+  duration_ms: 0.197247
+  type: 'test'
+  ...
+# Subtest: client policy blocks token decimals spoofed before signer
+ok 10 - client policy blocks token decimals spoofed before signer
+  ---
+  duration_ms: 1.306992
+  type: 'test'
+  ...
+# Subtest: client policy blocks token mislabeled before signer
+ok 11 - client policy blocks token mislabeled before signer
+  ---
+  duration_ms: 0.26303
+  type: 'test'
+  ...
+# Subtest: confirmation waiter accepts mined success
+ok 12 - confirmation waiter accepts mined success
+  ---
+  duration_ms: 0.398823
+  type: 'test'
+  ...
+# Subtest: confirmation waiter rejects failed execution
+ok 13 - confirmation waiter rejects failed execution
+  ---
+  duration_ms: 0.594038
+  type: 'test'
+  ...
+# Subtest: confirmation waiter times out for missing info and RPC errors
+ok 14 - confirmation waiter times out for missing info and RPC errors
+  ---
+  duration_ms: 30.637406
+  type: 'test'
+  ...
+# Subtest: TRC-20 public SDK flow: valid
+ok 15 - TRC-20 public SDK flow: valid
+  ---
+  duration_ms: 139.392049
+  type: 'test'
+  ...
+# Subtest: TRC-20 public SDK flow: wrong contract
+ok 16 - TRC-20 public SDK flow: wrong contract
+  ---
+  duration_ms: 25.076825
+  type: 'test'
+  ...
+# Subtest: TRC-20 public SDK flow: wrong amount
+ok 17 - TRC-20 public SDK flow: wrong amount
+  ---
+  duration_ms: 20.292401
+  type: 'test'
+  ...
+# Subtest: TRC-20 public SDK flow: wrong recipient
+ok 18 - TRC-20 public SDK flow: wrong recipient
+  ---
+  duration_ms: 26.593569
+  type: 'test'
+  ...
+# Subtest: TRC-20 public SDK flow: failed receipt
+ok 19 - TRC-20 public SDK flow: failed receipt
+  ---
+  duration_ms: 20.14697
+  type: 'test'
+  ...
+# Subtest: TRC-20 public SDK flow: missing log
+ok 20 - TRC-20 public SDK flow: missing log
+  ---
+  duration_ms: 16.382171
+  type: 'test'
+  ...
+1..20
+# tests 39
+# suites 0
+# pass 39
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 9514.383327

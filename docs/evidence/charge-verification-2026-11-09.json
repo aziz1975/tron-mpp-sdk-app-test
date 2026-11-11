@@ -1,0 +1,95 @@
+{
+  "verifiedAt": "2026-11-09T21:34:30.629Z",
+  "scope": {
+    "method": "tron",
+    "intent": "charge",
+    "credentialTypes": [
+      "transaction"
+    ]
+  },
+  "sdk": {
+    "path": "/home/aziz/localrepos/blockchain-projects/tron-mpp-sdk",
+    "version": "0.1.0",
+    "commit": "597284e1b5e92179543d7de654c96cee9a705ba6",
+    "gitStatus": "",
+    "build": "passed: npm run build",
+    "builtFileSha256": {
+      "chunk-JWCFQDC3.js": "810e0bb802e6ee8453b4cdc770b41b849a590568597ae9ab98e48cf0d2324244",
+      "index.js": "0a76943e3d39f2379c4b718811a3faf4d6f4817492233945b01102a99994e8d5",
+      "client/index.js": "ffbec849709dfa6288eb9ba8bbadbdcc10bf2798fd7a7e3a34245931b22f8a51",
+      "server/index.js": "108013f2c4ea3fae819b2396f2c06f63a4080fc02c1bc31aff26dd696833ad86",
+      "tronweb/index.js": "5f8c9ad0022b87554b6e80c2d00207b656e1652495895eb8dace00ffd0ff3a0b"
+    }
+  },
+  "app": {
+    "typecheck": "passed: npm run check",
+    "tests": {
+      "command": "npm test",
+      "passed": 29,
+      "failed": 0,
+      "skipped": 0
+    },
+    "nodeVersion": "v22.22.1",
+    "url": "http://127.0.0.1:3001"
+  },
+  "network": {
+    "name": "nile",
+    "chainId": 3448148188,
+    "fullHost": "https://nile.trongrid.io"
+  },
+  "payment": {
+    "token": "TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf",
+    "symbol": "USDT",
+    "decimals": 6,
+    "amountAtomic": "1000000",
+    "maxAtomicAmount": "1000000",
+    "payer": "TWtfUYRLfA4b61eJ3wwHmYcieV14rUTMCW",
+    "recipient": "TQGfKPHs3AwiBT44ibkCU64u1G4ttojUXU"
+  },
+  "http": {
+    "initialStatus": 402,
+    "paidStatus": 200,
+    "paymentReceipt": {
+      "method": "tron",
+      "reference": "0xd317960f9cf5b6bd7c592ef55f8f4982d908ba6b1660c7940230238f5ec21d62",
+      "status": "success",
+      "timestamp": "2026-11-09T21:31:33.000Z",
+      "challengeId": "wGRQbZV3UJozpQZEqbul0CVfWYo9VmLmIJQyzavNtNs",
+      "chainId": 3448148188
+    },
+    "body": {
+      "message": "TRC-20 payment verified. Premium content unlocked.",
+      "network": "nile",
+      "currency": "0xECa9bC828A3005B9a3b909f2cc5c2a54794DE05F",
+      "paymentReceiptAttached": true
+    }
+  },
+  "chain": {
+    "transactionId": "d317960f9cf5b6bd7c592ef55f8f4982d908ba6b1660c7940230238f5ec21d62",
+    "explorerUrl": "https://nile.tronscan.org/#/transaction/d317960f9cf5b6bd7c592ef55f8f4982d908ba6b1660c7940230238f5ec21d62",
+    "result": "SUCCESS",
+    "blockNumber": 72573604,
+    "blockTimeStamp": 1794259893000,
+    "confirmations": 59,
+    "feeSun": 0,
+    "energyUsageTotal": 14650,
+    "transfers": [
+      {
+        "from": "0xE57Ea93173DeA454EfF302E48E58DbA4F942dDBb",
+        "to": "0x9CDECCBED8527dcA387eE1116bC3915dE88d714a",
+        "amountAtomic": "1000000"
+      }
+    ]
+  },
+  "balances": {
+    "payerBeforeAtomic": "6636000000",
+    "payerAfterAtomic": "6635000000",
+    "recipientBeforeAtomic": "5245080005",
+    "recipientAfterAtomic": "5246080005"
+  },
+  "notes": [
+    "Only one live charge payment was submitted.",
+    "Replay was exercised by automated tests; npm run replay was not run on Nile.",
+    "Server uses an in-memory journal; preserve the server process while investigating uncertain submissions."
+  ]
+}

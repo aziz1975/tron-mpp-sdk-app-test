@@ -1,0 +1,56 @@
+{
+  "name": "tron-mpp-sdk-app-test",
+  "version": "0.1.0",
+  "private": true,
+  "description": "End-to-end Nile test application for tron-mpp-sdk.",
+  "type": "module",
+  "engines": {
+    "node": ">=20.12"
+  },
+  "scripts": {
+    "check": "tsc --noEmit",
+    "client": "node --env-file=.env --import tsx src/client.ts",
+    "challenge": "node --env-file=.env --import tsx src/challenge.ts",
+    "permit2:inspect": "node --env-file=.env --import tsx src/permit2.ts inspect",
+    "permit2:approve": "node --env-file=.env --import tsx src/permit2.ts approve",
+    "permit2:revoke": "node --env-file=.env --import tsx src/permit2.ts revoke",
+    "replay": "node --env-file=.env --import tsx src/replay.ts",
+    "server": "node --env-file=.env --import tsx src/server.ts",
+    "session:server": "node --env-file=.env --import tsx src/session-server.ts",
+    "session:inspect": "node --env-file=.env --import tsx src/session-client.ts inspect",
+    "session:challenge": "node --env-file=.env --import tsx src/session-client.ts challenge",
+    "session:approve": "node --env-file=.env --import tsx src/session-client.ts approve",
+    "session:revoke": "node --env-file=.env --import tsx src/session-client.ts revoke",
+    "session:open": "node --env-file=.env --import tsx src/session-client.ts open",
+    "session:voucher": "node --env-file=.env --import tsx src/session-client.ts voucher",
+    "session:topup": "node --env-file=.env --import tsx src/session-client.ts topUp",
+    "session:merge": "node --env-file=.env --import tsx src/session-client.ts merge",
+    "session:pay": "node --env-file=.env --import tsx src/session-client.ts pay",
+    "session:stream": "node --env-file=.env --import tsx src/session-client.ts stream",
+    "session:settle": "node --env-file=.env --import tsx src/session-client.ts settle",
+    "session:close": "node --env-file=.env --import tsx src/session-client.ts close",
+    "session:retry": "node --env-file=.env --import tsx src/session-client.ts retry",
+    "session:replay": "node --env-file=.env --import tsx src/session-client.ts replay",
+    "session:reconcile": "node --env-file=.env --import tsx src/session-client.ts reconcile",
+    "session:request-close": "node --env-file=.env --import tsx src/session-client.ts requestClose",
+    "session:withdraw": "node --env-file=.env --import tsx src/session-client.ts withdraw",
+    "test": "node --import tsx --test test/*.test.ts"
+  },
+  "dependencies": {
+    "mppx": "^0.15.0",
+    "tron-mpp-sdk": "file:../tron-mpp-sdk",
+    "tronweb": "^6.5.1",
+    "viem": "^2.57.13"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.10",
+    "tsx": "^4.20.3",
+    "typescript": "^5.8.3"
+  },
+  "overrides": {
+    "tronweb": {
+      "axios": "^1.20.0"
+    },
+    "follow-redirects": "^1.16.2"
+  }
+}
