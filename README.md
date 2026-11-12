@@ -17,7 +17,7 @@ The app is a test harness. Its charge journal is in memory, and its session file
 
 ## Setup for both flows
 
-1. Use Node.js 20.12 or later. Make sure the SDK is available at `../tron-mpp-sdk`, then build it and install this app's dependencies:
+1. Use Node.js 22.22 or later. Make sure the SDK is available at `../tron-mpp-sdk`, then build it and install this app's dependencies:
 
    ```sh
    cd ../tron-mpp-sdk
