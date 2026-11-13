@@ -53,12 +53,11 @@ Amounts in `.env` are whole **atomic units**, not decimal numbers. USDT has six 
 
 ## Charge intent: pay once
 
-The charge server protects `GET /premium` on port **3000**. It offers one configured credential type:
+The charge server protects `GET /premium` on port **3001**. It offers one configured credential type and currently it supports permit2 only:
 
-- `transaction` (default): the client signs a token transfer; the server submits it.
 - `permit2`: the client signs a Permit2 authorization; the server's relayer submits it.
 
-In either case the SDK checks the payment and confirms the token transfer before the app returns its example content. Charge does not use a session escrow.
+The SDK checks the payment and confirms the token transfer before the app returns its example content. Charge does not use a session escrow.
 
 ### Charge sequence
 
@@ -75,24 +74,6 @@ sequenceDiagram
     Chain-->>Server: Confirm token transfer
     Server-->>Client: HTTP 200, content, and payment receipt
 ```
-
-### Test a transaction charge
-
-1. In `.env`, set `CHARGE_CREDENTIAL_TYPE=transaction`. Set `PAYMENT_AMOUNT_ATOMIC` and `MAX_PAYMENT_AMOUNT_ATOMIC` to `1000000` for a 1 USDT test. The second value is the client's spending limit.
-2. Start the server in one terminal:
-
-   ```sh
-   npm run charge:server
-   ```
-
-3. In a second terminal, inspect the payment request and then pay:
-
-   ```sh
-   npm run charge:challenge
-   npm run charge:client
-   ```
-
-   The challenge command checks and prints the HTTP 402 terms without paying. The client command makes a **live Nile payment**. Expect HTTP 200, premium content, and a `Payment-Receipt` after confirmation.
 
 ### Test a Permit2 charge
 
@@ -123,7 +104,7 @@ If a charge returns 503 or its result is uncertain, keep the server running and 
 
 ## Session intent: pay for multiple messages
 
-The session server uses `/session` on port **3001**. It uses Permit2 regardless of `CHARGE_CREDENTIAL_TYPE`. A **deposit** is tokens held in escrow; a **voucher** is the payer's signed authorization for a cumulative total the merchant may claim. Adding a deposit alone does not increase the voucher.
+The session server uses `/session` on port **3001**. A **deposit** is tokens held in escrow; a **voucher** is the payer's signed authorization for a cumulative total the merchant may claim. Adding a deposit alone does not increase the voucher.
 
 With the example settings, each message costs 0.1 USDT, the initial deposit is 1 USDT, and the deposit and voucher limits are each 2 USDT. Settlement can pay the highest accepted voucher; closing refunds the amount not settled.
 
