@@ -53,9 +53,12 @@ Amounts in `.env` are whole **atomic units**, not decimal numbers. USDT has six 
 
 ## Charge intent: pay once
 
-The charge server protects `GET /premium` on port **3001**. It offers one configured credential type and currently it supports permit2 only:
+The charge server protects `GET /premium` on port **3000**. It offers the credential type selected by `CREDENTIAL_TYPE`:
 
 - `permit2`: the client signs a Permit2 authorization; the server's relayer submits it.
+- `transaction`: the client signs a token transfer transaction, which the server broadcasts.
+
+The session commands use the same setting and currently require `CREDENTIAL_TYPE=permit2`.
 
 The SDK checks the payment and confirms the token transfer before the app returns its example content. Charge does not use a session escrow.
 
@@ -77,7 +80,7 @@ sequenceDiagram
 
 ### Test a Permit2 charge
 
-1. In `.env`, set `CHARGE_CREDENTIAL_TYPE=permit2`, `TRON_PERMIT2_ADDRESS`, `TRON_RELAYER_PRIVATE_KEY`, and `TRON_PERMIT2_SPENDER_ADDRESS`. The spender must be the address belonging to the relayer key. The merchant recipient may be a different address. The example file contains the [Nile Permit2 address](https://docs.sun.io/protocols/sunswap-v4/reference/contract/). Fund the relayer with Nile TRX/resources.
+1. In `.env`, set `CREDENTIAL_TYPE=permit2`, `TRON_PERMIT2_ADDRESS`, `TRON_RELAYER_PRIVATE_KEY`, and `TRON_PERMIT2_SPENDER_ADDRESS`. The spender must be the address belonging to the relayer key. The merchant recipient may be a different address. The example file contains the [Nile Permit2 address](https://docs.sun.io/protocols/sunswap-v4/reference/contract/). Fund the relayer with Nile TRX/resources.
 2. Keep the token, payer, recipient, secret, and amount settings from setup. To show the relayer address without printing its private key, run:
 
    ```sh

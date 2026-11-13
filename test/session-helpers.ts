@@ -23,7 +23,7 @@ const uint = (value: bigint) => encodeAbiParameters([{ type: 'uint256' }], [valu
 
 export async function sessionFixture() {
   const stateDir = mkdtempSync(join(tmpdir(), 'session-app-test-'))
-  const common = { chainId, port: 0, serverUrl: '', fullHost: 'http://127.0.0.1:1', tronProApiKey: undefined,
+  const common = { credentialType: 'permit2' as const, chainId, port: 0, serverUrl: '', fullHost: 'http://127.0.0.1:1', tronProApiKey: undefined,
     tokenAddress: token, recipientAddress: recipient, escrowAddress: escrow, permit2Address: permit2, stateDir,
     unitAmount: '10', deposit: '100', topUp: '100', maxDeposit: '200', maxCumulative: '200', streamUnits: 4,
     transactionTimeoutMs: 15, pollIntervalMs: 1, minConfirmations: 1 }

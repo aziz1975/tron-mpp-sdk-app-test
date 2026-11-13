@@ -24,6 +24,8 @@ function key(name: string) {
   return value
 }
 export function loadSessionConfig() {
+  const credentialType = process.env.CREDENTIAL_TYPE?.trim() || 'transaction'
+  if (credentialType !== 'permit2') throw new Error('CREDENTIAL_TYPE must be permit2 for session; other session credential types are not implemented by this app.')
   const port = integer('SESSION_PORT', 3001, 65535)
   const unitAmount = amount('SESSION_UNIT_AMOUNT_ATOMIC', '100000')
   const deposit = amount('SESSION_DEPOSIT_ATOMIC', '1000000')
@@ -32,7 +34,7 @@ export function loadSessionConfig() {
   const maxCumulative = amount('SESSION_MAX_CUMULATIVE_ATOMIC', '2000000')
   if (BigInt(deposit) < BigInt(unitAmount) || BigInt(deposit) > BigInt(maxDeposit) || BigInt(topUp) > BigInt(maxDeposit)) throw new Error('Session deposit/top-up settings exceed policy or do not cover one unit.')
   if (BigInt(maxCumulative) < BigInt(unitAmount)) throw new Error('SESSION_MAX_CUMULATIVE_ATOMIC must cover one unit.')
-  return { chainId: chains.nile, port, serverUrl: `http://127.0.0.1:${port}`,
+  return { credentialType: credentialType as 'permit2', chainId: chains.nile, port, serverUrl: `http://127.0.0.1:${port}`,
     fullHost: process.env.TRON_FULL_HOST?.trim() || 'https://nile.trongrid.io',
     tronProApiKey: process.env.TRON_PRO_API_KEY?.trim() || undefined,
     tokenAddress: address('TRON_TOKEN_ADDRESS'), recipientAddress: address('TRON_RECIPIENT_ADDRESS'),

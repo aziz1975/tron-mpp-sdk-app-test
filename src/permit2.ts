@@ -19,7 +19,7 @@ async function main() {
   const action = process.argv[2]
   if (!['inspect', 'approve', 'revoke'].includes(action ?? '')) throw new Error('Use inspect, approve, or revoke.')
   const config = loadClientConfig()
-  if (!config.permit2) throw new Error('Set CHARGE_CREDENTIAL_TYPE=permit2 first.')
+  if (!config.permit2) throw new Error('Set CREDENTIAL_TYPE=permit2 first.')
   const permit2 = config.permit2
   const payer = normalizeAddress(TronWeb.address.fromPrivateKey(config.payerPrivateKey) || '')
   // Inspect uses a node without a signing key; only explicit approve/revoke can broadcast.

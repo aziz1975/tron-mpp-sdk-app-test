@@ -1,7 +1,7 @@
 # Permit2 session testing on Nile
 
-The session commands use the updated local SDK and are independent of
-`CHARGE_CREDENTIAL_TYPE`. They advertise only `permit2`. Existing charge commands
+The session commands use the updated local SDK and require
+`CREDENTIAL_TYPE=permit2`. Existing charge commands
 continue to use `/premium` on port 3000; sessions use `/session` on port 3001.
 
 ## Configure the existing .env

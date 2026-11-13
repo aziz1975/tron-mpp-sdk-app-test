@@ -13,7 +13,7 @@ assert.equal(challenge.intent, 'charge')
 assert.equal(request.methodDetails.chainId, config.chainId)
 assert.equal(normalizeAddress(request.currency), config.tokenAddress)
 assert.equal(normalizeAddress(request.recipient), config.recipientAddress)
-assert.deepEqual(request.methodDetails.credentialTypes, [config.credentialType], 'Restart the server after changing CHARGE_CREDENTIAL_TYPE.')
+assert.deepEqual(request.methodDetails.credentialTypes, [config.credentialType], 'Restart the server after changing CREDENTIAL_TYPE.')
 if (config.permit2) {
   assert.equal(normalizeAddress(request.methodDetails.permit2Address ?? ''), config.permit2.address)
   assert.equal(normalizeAddress(request.methodDetails.spender ?? ''), config.permit2.spender)

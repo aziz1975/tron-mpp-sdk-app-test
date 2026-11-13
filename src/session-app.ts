@@ -35,7 +35,7 @@ export async function createSessionApp(config: SessionServerConfig, dependencies
   const release = dependencies.store ? () => {} : acquireLock(join(config.stateDir, 'server.lock'))
   try {
     const method = tron.session({ adapter: dependencies.adapter ?? serverAdapter(config), currency: config.tokenAddress,
-      recipient: config.recipientAddress, credentialTypes: ['permit2'], permit2Contract: config.permit2Address,
+      recipient: config.recipientAddress, credentialTypes: [config.credentialType], permit2Contract: config.permit2Address,
       chargeOnVerify: false, store: dependencies.store ?? fileStore(join(config.stateDir, 'server.json')) })
     const payment = Mppx.create({ secretKey: config.mppSecretKey, methods: [method] })
     const paid = Mppx.toNodeListener(payment.session({ amount: config.unitAmount, unitType: 'message', suggestedDeposit: config.deposit }))
@@ -43,7 +43,7 @@ export async function createSessionApp(config: SessionServerConfig, dependencies
       try {
         const url = new URL(request.url ?? '/', 'http://localhost')
         if (request.method === 'GET' && url.pathname === '/health') {
-          json(response, 200, { status: 'ok', intent: 'session', credentialTypes: ['permit2'], chainId: config.chainId,
+          json(response, 200, { status: 'ok', intent: 'session', credentialTypes: [config.credentialType], chainId: config.chainId,
             currency: config.tokenAddress, recipient: config.recipientAddress, escrowContract: config.escrowAddress,
             permit2Contract: config.permit2Address, unitAmount: config.unitAmount }); return
         }

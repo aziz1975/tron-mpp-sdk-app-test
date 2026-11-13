@@ -47,7 +47,7 @@ export class SessionTestClient {
       normalizeAddress(request.currency) !== c.tokenAddress || normalizeAddress(request.recipient) !== c.recipientAddress ||
       normalizeAddress(request.methodDetails.escrowContract) !== c.escrowAddress ||
       normalizeAddress(request.methodDetails.permit2Contract ?? '') !== c.permit2Address || request.methodDetails.feePayer !== true ||
-      JSON.stringify(request.methodDetails.credentialTypes) !== '["permit2"]' || request.amount !== c.unitAmount) throw new Error('Session challenge does not match local policy. Restart the matching server/configuration.')
+      JSON.stringify(request.methodDetails.credentialTypes) !== JSON.stringify([c.credentialType]) || request.amount !== c.unitAmount) throw new Error('Session challenge does not match local policy. Restart the matching server/configuration.')
     if (!challenge.expires || !Number.isFinite(Date.parse(challenge.expires)) || Date.parse(challenge.expires) <= Date.now()) throw new Error('Session challenge expired.')
     return request
   }
@@ -69,7 +69,7 @@ export class SessionTestClient {
     const nonce = BigInt(randomHex())
     const used = BigInt(await this.transport.call(c.permit2Address, encodeFunctionData({ abi: sessionViews, functionName: 'nonceBitmap', args: [c.payer, nonce >> 8n] })))
     if (used & (1n << (nonce & 255n))) throw new Error('Random Permit2 nonce is already consumed; prepare again.')
-    return { action: channelId ? 'topUp' : 'open', type: 'permit2', ...(salt ? { salt } : {}),
+    return { action: channelId ? 'topUp' : 'open', type: c.credentialType, ...(salt ? { salt } : {}),
       authorization: { from: c.payer, permitted: { token: c.tokenAddress, amount }, nonce: nonce.toString(),
         deadline: String(Math.floor(Date.now() / 1000) + 300), witness: channelId ? { channelId } : { payee: c.recipientAddress, salt: salt!, authorizedSigner: zeroAddress } } }
   }

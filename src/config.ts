@@ -39,8 +39,8 @@ function privateKey(name: string): string {
 export function loadSharedConfig() {
   const port = positiveInteger('PORT', 3000)
   if (port > 65535) throw new Error('PORT must be at most 65535.')
-  const credentialType = process.env.CHARGE_CREDENTIAL_TYPE?.trim() || 'transaction'
-  if (credentialType !== 'transaction' && credentialType !== 'permit2') throw new Error('CHARGE_CREDENTIAL_TYPE must be transaction or permit2.')
+  const credentialType = process.env.CREDENTIAL_TYPE?.trim() || 'transaction'
+  if (credentialType !== 'transaction' && credentialType !== 'permit2') throw new Error('CREDENTIAL_TYPE must be transaction or permit2 for charge.')
   const permit2 = credentialType === 'permit2' ? {
     address: address('TRON_PERMIT2_ADDRESS', true),
     spender: address('TRON_PERMIT2_SPENDER_ADDRESS', true),

@@ -90,7 +90,7 @@ test('Permit2 configuration requires a trusted contract/spender and a matching s
   const original = process.env
   try {
     process.env = { MPP_SECRET_KEY: 'local-config-secret', TRON_PAYER_PRIVATE_KEY: key, TRON_TOKEN_ADDRESS: token, TRON_RECIPIENT_ADDRESS: recipient,
-      CHARGE_CREDENTIAL_TYPE: 'permit2', TRON_PERMIT2_ADDRESS: toBase58Address(permit2), TRON_PERMIT2_SPENDER_ADDRESS: toBase58Address(spender) }
+      CREDENTIAL_TYPE: 'permit2', TRON_PERMIT2_ADDRESS: toBase58Address(permit2), TRON_PERMIT2_SPENDER_ADDRESS: toBase58Address(spender) }
     const config = loadClientConfig()
     assert.equal(config.credentialType, 'permit2'); assert.deepEqual(config.permit2, { address: permit2, spender })
     assert.throws(loadServerConfig, /TRON_RELAYER_PRIVATE_KEY/)
@@ -106,9 +106,9 @@ test('Permit2 configuration requires a trusted contract/spender and a matching s
       assert.throws(loadServerConfig, new RegExp(name))
       process.env[name] = value
     }
-    process.env.CHARGE_CREDENTIAL_TYPE = 'session'
-    assert.throws(loadServerConfig, /CHARGE_CREDENTIAL_TYPE/)
-    process.env.CHARGE_CREDENTIAL_TYPE = 'transaction'
+    process.env.CREDENTIAL_TYPE = 'session'
+    assert.throws(loadServerConfig, /CREDENTIAL_TYPE/)
+    process.env.CREDENTIAL_TYPE = 'transaction'
     delete process.env.TRON_RELAYER_PRIVATE_KEY
     assert.equal(loadServerConfig().relayerPrivateKey, undefined)
   } finally { process.env = original }

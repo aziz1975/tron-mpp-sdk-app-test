@@ -191,11 +191,17 @@ test('single-process file store serializes debits and fails closed on corrupted 
   assert.equal(readFileSync(path, 'utf8'), '{corrupt')
 })
 
-test('session configuration is independent of charge credential mode and validates merchant signing', () => {
+test('session configuration validates credential mode and merchant signing', () => {
   const previous = process.env
   try {
     process.env = { TRON_TOKEN_ADDRESS: token, TRON_RECIPIENT_ADDRESS: recipient, TRON_PERMIT2_ADDRESS: permit2,
-      TRON_SESSION_ESCROW_ADDRESS: escrow, TRON_PAYER_PRIVATE_KEY: key, TRON_RELAYER_PRIVATE_KEY: '2'.repeat(64), MPP_SECRET_KEY: 'session-config-test-secret', CHARGE_CREDENTIAL_TYPE: 'transaction' }
+      TRON_SESSION_ESCROW_ADDRESS: escrow, TRON_PAYER_PRIVATE_KEY: key, TRON_RELAYER_PRIVATE_KEY: '2'.repeat(64), MPP_SECRET_KEY: 'session-config-test-secret', CREDENTIAL_TYPE: 'permit2' }
+    assert.equal(loadSessionClientConfig().credentialType, 'permit2')
+    process.env.CREDENTIAL_TYPE = 'transaction'
+    assert.throws(loadSessionClientConfig, /CREDENTIAL_TYPE must be permit2/)
+    process.env.CREDENTIAL_TYPE = 'authorization'
+    assert.throws(loadSessionServerConfig, /CREDENTIAL_TYPE must be permit2/)
+    process.env.CREDENTIAL_TYPE = 'permit2'
     assert.equal(loadSessionClientConfig().escrowAddress, escrow)
     assert.throws(loadSessionServerConfig, /TRON_PAYEE_PRIVATE_KEY/)
     process.env.TRON_PAYEE_PRIVATE_KEY = '3'.repeat(64)
