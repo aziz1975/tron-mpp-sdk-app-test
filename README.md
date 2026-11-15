@@ -53,9 +53,10 @@ Amounts in `.env` are whole **atomic units**, not decimal numbers. USDT has six 
 
 ## Charge intent: pay once
 
-The charge server protects `GET /premium` on port **3000**. It offers the credential type selected by `CREDENTIAL_TYPE`:
+The charge server protects `GET /premium` on the port set by `PORT` (3001 in `.env.example`, or 3000 if unset). It offers the credential type selected by `CREDENTIAL_TYPE`:
 
 - `permit2`: the client signs a Permit2 authorization; the server's relayer submits it.
+- `transaction`: the client submits a token transfer transaction as the credential.
 
 The SDK checks the payment and confirms the token transfer before the app returns its example content. Charge does not use a session escrow.
 
@@ -77,16 +78,38 @@ sequenceDiagram
 
 ### Test a Permit2 charge
 
-1. In `.env`, set `CREDENTIAL_TYPE=permit2`, `TRON_PERMIT2_ADDRESS`, `TRON_RELAYER_PRIVATE_KEY`, and `TRON_PERMIT2_SPENDER_ADDRESS`. The spender must be the address belonging to the relayer key. The merchant recipient may be a different address. The example file contains the [Nile Permit2 address](https://docs.sun.io/protocols/sunswap-v4/reference/contract/). Fund the relayer with Nile TRX/resources.
-2. Keep the token, payer, recipient, secret, and amount settings from setup. To show the relayer address without printing its private key, run:
+For example, imagine **Alice buys an article from Bob's website for 1 USDT**:
+
+- **Alice is the buyer and payer.** Her wallet owns the USDT, approves Permit2, and signs the payment authorization. Configure her key as `TRON_PAYER_PRIVATE_KEY`. Alice pays the TRX/resource costs for her approval transaction.
+- **Bob is the merchant and recipient.** His wallet receives the 1 USDT. Configure its address as `TRON_RECIPIENT_ADDRESS`.
+- **Bob's service operates the relayer**, which submits Alice's authorization and sponsors the payment transaction's TRX/resource costs. Configure its key as `TRON_RELAYER_PRIVATE_KEY`. The relayer can be a separate wallet from Bob's receiving wallet.
+- **The spender** is the address authorized to submit the Permit2 transfer. In this test it is the relayer's address, configured as `TRON_PERMIT2_SPENDER_ADDRESS`.
+- **Permit2** is the contract that checks Alice's authorization and transfers her USDT to Bob. Alice grants the token allowance to the contract at `TRON_PERMIT2_ADDRESS`.
+
+1. In `.env`, set `CREDENTIAL_TYPE=permit2`, `TRON_PERMIT2_ADDRESS`, `TRON_RELAYER_PRIVATE_KEY`, and `TRON_PERMIT2_SPENDER_ADDRESS`. The spender must be the address belonging to the relayer key. The example file contains the [Nile Permit2 address](https://docs.sun.io/protocols/sunswap-v4/reference/contract/). Fund the relayer with Nile TRX/resources.
+2. Keep the token, payer, recipient, and secret settings from setup. For a 1 USDT test, set both `PAYMENT_AMOUNT_ATOMIC` and `MAX_PAYMENT_AMOUNT_ATOMIC` to `1000000`. The payer needs at least 1 Nile USDT and enough Nile TRX/resources to approve Permit2. To show the relayer address without printing its private key, run:
 
    ```sh
    node --env-file=.env --input-type=module -e "import { TronWeb } from 'tronweb'; console.log(TronWeb.address.fromPrivateKey(process.env.TRON_RELAYER_PRIVATE_KEY.replace(/^0x/, '')))"
    ```
 
-3. Run `npm run charge:inspect` to check the token, balances, Permit2 allowance and signing domain. It does not sign or pay. Check `domainMatchesSdk` and `balanceCoversClientCap` are true.
-4. Run `npm run charge:approve` to give Permit2 an allowance equal to `MAX_PAYMENT_AMOUNT_ATOMIC`. This sends an on-chain transaction but does not transfer tokens. If a different nonzero allowance exists, run `npm run charge:revoke` first. Run `charge:inspect` again and check `allowanceCoversClientCap`.
-5. Start `npm run charge:server` in one terminal. In another, run `npm run charge:challenge`, followed by `npm run charge:client`. The latter makes a **live Nile payment**. Expect HTTP 200, a receipt, and a confirmed transaction hash. Inspect the balances again or look up the hash on [Nile Tronscan](https://nile.tronscan.org/).
+3. Run `npm run charge:inspect` to read token details, balances, Permit2 allowance, and signing domain without signing or paying. Check that `domainMatchesSdk` and `balanceCoversClientCap` are `true`. Record `payerTokenAtomic` and `recipientTokenAtomic` for comparison after payment.
+4. Run `npm run charge:approve` to give Permit2 an allowance equal to `MAX_PAYMENT_AMOUNT_ATOMIC` (1 USDT in this example). This sends an on-chain transaction but does not transfer tokens. If a different nonzero allowance exists, run `npm run charge:revoke` first, then approve. Run `npm run charge:inspect` again and check `allowanceCoversClientCap` is `true`.
+5. Start `npm run charge:server` in terminal 1 and leave it running. Restart it after changing `.env`.
+6. In terminal 2, run `npm run charge:challenge`. This checks the HTTP 402 payment terms without signing or paying. Confirm the output shows `intent: "charge"` and `credentialTypes: ["permit2"]`.
+7. Run `npm run charge:client` in terminal 2. The payer signs the authorization and the relayer submits it. A successful **live Nile payment** returns HTTP 200, a receipt, and a confirmed transaction hash. Each successful run makes a new payment; with these settings, it is 1 USDT.
+8. Run `npm run charge:inspect` again. If the payer and recipient are different wallets, their balances should have decreased and increased respectively by 1 USDT (1,000,000 atomic units). You can also look up the transaction hash on [Nile Tronscan](https://nile.tronscan.org/).
+
+The inspection output includes:
+
+- `network`, `chainId`, and `fullHost`: the network, configured chain ID, and node URL.
+- `token`, `symbol`, and `decimals`: the token contract and its metadata. For six-decimal USDT, divide atomic units by 1,000,000.
+- `permit2`, `spender`, `payer`, and `recipient`: the contract and wallet addresses described above.
+- `payerTokenAtomic` and `recipientTokenAtomic`: token balances in atomic units. `payerTrxSun` and `relayerTrxSun` are TRX balances in sun (1 TRX = 1,000,000 sun).
+- `allowanceAtomic`: the current token allowance granted to Permit2; `approvalTargetAtomic` is the allowance the approval command will set.
+- `domainMatchesSdk`: whether the contract's signing domain matches the SDK's expected Permit2 name, chain ID, and contract address. A mismatch stops inspection with an error.
+- `nonceBitmapWordZero`: the first word of the payer's Permit2 nonce bitmap; zero means none of its slots are marked used.
+- `allowanceCoversClientCap` and `balanceCoversClientCap`: whether the allowance and payer balance respectively cover `MAX_PAYMENT_AMOUNT_ATOMIC`.
 
 ### Charge commands
 
