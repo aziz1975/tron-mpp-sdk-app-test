@@ -56,9 +56,6 @@ Amounts in `.env` are whole **atomic units**, not decimal numbers. USDT has six 
 The charge server protects `GET /premium` on port **3000**. It offers the credential type selected by `CREDENTIAL_TYPE`:
 
 - `permit2`: the client signs a Permit2 authorization; the server's relayer submits it.
-- `transaction`: the client signs a token transfer transaction, which the server broadcasts.
-
-The session commands use the same setting and currently require `CREDENTIAL_TYPE=permit2`.
 
 The SDK checks the payment and confirms the token transfer before the app returns its example content. Charge does not use a session escrow.
 
