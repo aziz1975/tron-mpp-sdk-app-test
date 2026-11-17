@@ -165,65 +165,281 @@ A stream can stop and request a higher voucher when its authorized credit runs o
 
 ### Prepare a session
 
-1. Deploy `TronPaymentChannel` separately from `../tron-mpp-sdk-contract`, using TRON-compiled bytecode, the configured Permit2 address, an allowlist containing the token, and a close grace period of at least 900 seconds. This app does not deploy it.
-2. Set `TRON_SESSION_ESCROW_ADDRESS` to the deployed contract in `../tron-mpp-sdk/.env` (copy the SDK’s `.env.example` if needed). Set `TRON_RELAYER_PRIVATE_KEY` and fund that relayer with Nile TRX/resources. Set `TRON_PAYEE_PRIVATE_KEY` to the key for `TRON_RECIPIENT_ADDRESS`, unless the relayer is already that merchant. The merchant signs settlement and close authorizations; the relayer submits them.
-   The SDK reads this file during `npm run build` and embeds the validated address. Rebuild the SDK and restart the app after changing the address. The app does not configure or pass an escrow address; `session:inspect` displays it for diagnostics.
+Whenever this guide says a `*_PRIVATE_KEY` **wallet**, it means the address derived from that key. Keep the key itself private. For example, Alice buys messages from Bob's API using these wallets and contracts:
 
-3. Check the `SESSION_*` settings in `.env.example`. `SESSION_MAX_DEPOSIT_ATOMIC` and `SESSION_MAX_CUMULATIVE_ATOMIC` are separate client limits. The payer needs enough tokens for the deposit and TRX/resources for approval or forced withdrawal.
-4. For sessions, the escrow is the Permit2 spender; the payer still grants the token allowance to Permit2. `TRON_PERMIT2_SPENDER_ADDRESS` is only for charge. Both flows share the token's Permit2 allowance, so check that no charge is pending before changing it.
+| Configuration | Role and balance impact |
+| --- | --- |
+| `TRON_PAYER_PRIVATE_KEY` wallet (Alice) | Owns the USDT, signs funding authorizations and vouchers, supplies the deposits, and receives refunds. Pays TRX/resource costs for approval, revocation, and forced-close transactions. |
+| `TRON_RECIPIENT_ADDRESS` (Bob) | Merchant address receiving USDT at settlement and cooperative close. |
+| `TRON_PAYEE_PRIVATE_KEY` wallet | Must be the wallet at `TRON_RECIPIENT_ADDRESS`. Signs settlement and cooperative-close authorizations off-chain; signing alone costs no TRX/resources. |
+| `TRON_RELAYER_PRIVATE_KEY` wallet | Submits opening, top-up, settlement, and cooperative-close transactions and pays their TRX/resource costs. Can be separate from Bob's receiving wallet. |
+| `TRON_PERMIT2_ADDRESS` | Contract Alice approves to transfer authorized USDT from her wallet into escrow. Approval grants permission; it does not send USDT to Permit2. |
+| `TRON_PERMIT2_SPENDER_ADDRESS` | Charge-only setting; unused by session intent. The escrow contract is the Permit2 spender for sessions. |
+| `TRON_SESSION_ESCROW_ADDRESS` | Contract holding channel deposits, paying the merchant, and refunding the payer. Set in the SDK's `.env` and embedded during its build. |
+| `TRON_TOKEN_ADDRESS` | USDT token contract recording balances and allowances. |
+
+1. Reuse a compatible Nile `TronPaymentChannel` deployment, or deploy one separately from `../tron-mpp-sdk-contract`, using TRON-compiled bytecode, the configured Permit2 address, an allowlist containing the token, and a close grace period of at least 900 seconds. This app does not deploy it.
+2. Set `TRON_SESSION_ESCROW_ADDRESS=<deployed Nile escrow address>` in **`../tron-mpp-sdk/.env`** (copy the SDK's `.env.example` if needed; preserve an existing file). From the app directory, build the SDK:
+
+   ```sh
+   cd ../tron-mpp-sdk
+   npm run build
+   cd ../tron-mpp-sdk-app-test
+   ```
+
+   `cd` changes the working directory; `npm run build` validates and embeds the escrow address. These commands move no tokens. Rebuild the SDK and restart the app after changing SDK code or that address. The app does not configure or pass an escrow address; `session:inspect` displays it for diagnostics.
+
+3. In the **app's `.env`**, preserve the existing Nile host, token, Permit2, payer key, recipient, relayer key, and `MPP_SECRET_KEY`. Set `TRON_PAYEE_PRIVATE_KEY` to the key for `TRON_RECIPIENT_ADDRESS`; it can be omitted only when the relayer is already that merchant. Confirm these values for the walkthrough:
+
+   ```dotenv
+   CREDENTIAL_TYPE=permit2
+   SESSION_PORT=3001
+   SESSION_STATE_DIR=.data/session
+   SESSION_UNIT_AMOUNT_ATOMIC=100000
+   SESSION_DEPOSIT_ATOMIC=1000000
+   SESSION_TOP_UP_ATOMIC=1000000
+   SESSION_MAX_DEPOSIT_ATOMIC=2000000
+   SESSION_MAX_CUMULATIVE_ATOMIC=2000000
+   SESSION_STREAM_UNITS=4
+   ```
+
+   These settings price a message at 0.1 USDT, open with a 1-USDT deposit, allow a further 1-USDT deposit, and cap total funding and cumulative authorization separately at 2 USDT. A default voucher update adds 0.4 USDT of cumulative authorization; a stream attempts up to four messages.
+
+4. Fund the `TRON_PAYER_PRIVATE_KEY` wallet with at least **2 Nile USDT** and sufficient Nile TRX/resources for approval. Fund the `TRON_RELAYER_PRIVATE_KEY` wallet with Nile TRX/resources for its sponsored transactions. Merchant authorization signatures alone require no TRX/resources. Both charge and session share the payer's token allowance to Permit2, so resolve pending payments before changing it.
+5. Use a fresh channel with no unresolved operations. Use a separate `SESSION_STATE_DIR` when changing wallets, token, escrow, or server port, and preserve previous journals. The balance examples assume Alice and Bob are different wallets. An escrow may hold other channels too; the escrow balances below refer only to this channel's remaining funds.
 
 ### Test a session
 
-For example, imagine **Alice buys messages from Bob's API for 0.1 USDT each**, using a channel instead of making a separate on-chain payment for every message:
+Run each command separately and check its result before continuing. A service charge updates `spent`; an on-chain transfer changes token balances. Vouchers and messages send no blockchain transaction and cost no TRX/resources.
 
-- **Alice is the buyer and payer.** Her wallet owns the USDT and signs funding authorizations and cumulative vouchers. Configure her key as `TRON_PAYER_PRIVATE_KEY`. She pays the TRX/resource costs for token approval and, if needed, forced-close transactions.
-- **Bob is the merchant and payee.** His wallet receives settled payments. Configure its address as `TRON_RECIPIENT_ADDRESS` and its signing key as `TRON_PAYEE_PRIVATE_KEY`, unless the relayer already uses that same wallet. Bob's key authorizes settlement and cooperative close.
-- **Bob's service operates the relayer.** Configure its key as `TRON_RELAYER_PRIVATE_KEY`. It submits the opening deposit, top-ups, settlement, and cooperative close, and sponsors their TRX/resource costs. It can be a separate wallet from Bob's receiving wallet.
-- **The escrow holds Alice's deposit for the channel.** It pays Bob when payments are settled and refunds the unsettled remainder to Alice when the channel closes. Its address comes from the SDK's `.env` during the SDK build; the app does not supply it.
-- **Permit2 transfers the authorized funding into escrow.** Alice approves the contract at `TRON_PERMIT2_ADDRESS`; `session:approve` sets that allowance to `SESSION_MAX_DEPOSIT_ATOMIC` (2 USDT with these settings). The escrow is the Permit2 spender for sessions; the charge-only `TRON_PERMIT2_SPENDER_ADDRESS` is not used here.
+#### 1. Check the app and start the server
 
-For the sequence below, Alice needs at least 2 Nile test USDT, and both Alice and the relayer need sufficient Nile TRX/resources for their transactions. Use a fresh channel with no unresolved operations and the default six-decimal amounts. A deposit funds the channel; a voucher authorizes a cumulative amount Bob may claim. Voucher updates and individual message requests do not send blockchain transactions.
+From the app directory:
 
-Start the server in one terminal:
+```sh
+npm run check
+```
+
+Checks TypeScript. No wallet or token balance changes.
+
+```sh
+npm test
+```
+
+Runs automated tests with test keys and simulated chain receipts. It does not load `.env`, contact Nile, or spend funds.
+
+In terminal 1:
 
 ```sh
 npm run session:server
 ```
 
-In a second terminal, run these one at a time and check each result:
+Checks the escrow's Permit2, token allowlist, grace period, and signing domains, then starts the merchant's service. No transaction is broadcast and no USDT moves. Leave this terminal running. If the charge server occupies port 3001, stop it or configure a different session port.
+
+In terminal 2, from the app directory:
+
+```sh
+curl http://127.0.0.1:3001/health
+```
+
+Checks the server's health and session configuration. No funds move. Adjust the URL if you changed `SESSION_PORT`.
 
 ```sh
 npm run session:inspect
+```
+
+Reads the payer's balance, Permit2 allowance, escrow details, saved channel, and pending operations without signing or broadcasting. Confirm the intended escrow and a grace period of at least 900 seconds.
+
+```sh
 npm run session:challenge
+```
+
+Checks the payment terms without signing or paying. Expect HTTP 402, `permit2`, and `100000` atomic units per message (0.1 USDT). No funds move.
+
+#### 2. Approve Permit2 and open the channel
+
+```sh
 npm run session:approve
-npm run session:open
-npm run session:voucher
-npm run session:pay
-npm run session:stream
-npm run session:merge
-npm run session:stream
-npm run session:settle
-npm run session:voucher -- 1200000
-npm run session:pay
-npm run session:close
+```
+
+The `TRON_PAYER_PRIVATE_KEY` wallet grants `TRON_PERMIT2_ADDRESS` a **2-USDT allowance**. No USDT moves to Permit2, escrow, or the merchant. The payer submits the approval transaction and pays its TRX/resource costs; if the allowance already equals the target, no transaction is sent.
+
+If a different nonzero allowance exists, resolve pending charge/session operations, run `npm run session:revoke`, then approve again. Revocation sets the allowance to zero, transfers no USDT, and costs the payer TRX/resources if a transaction is needed.
+
+```sh
 npm run session:inspect
 ```
 
-For this exact sequence, expect:
+Reads the allowance without moving funds. Expect `allowance: "2000000"`.
 
-| Step | What happens to Alice's funds and Bob's payments |
+```sh
+npm run session:open
+```
+
+The payer signs the opening and funding authorizations. The relayer submits the transaction; Permit2 transfers **1 USDT from the `TRON_PAYER_PRIVATE_KEY` wallet to `TRON_SESSION_ESCROW_ADDRESS`**. Verify the token transfer and `ChannelOpened` event.
+
+| Address impacted | Change |
 | --- | --- |
-| Approve | Alice grants Permit2 a 2-USDT allowance; no tokens move yet. |
-| Open | The relayer submits Alice's signed authorization; 1 USDT moves from Alice to escrow. Bob has received nothing yet. |
-| First voucher | Alice authorizes up to 0.4 USDT cumulatively; no tokens move. |
-| Pay, then first stream | Bob delivers one message and then three more, bringing delivered spend to 0.4 USDT. The stream requests a higher voucher before delivering a fifth message. |
-| Merge | Another 1 USDT moves from Alice to escrow, bringing total deposits to 2 USDT; Alice also raises her cumulative voucher to 0.8 USDT. |
-| Second stream | Bob delivers four more messages, bringing delivered spend to 0.8 USDT. |
-| Settle | The relayer submits Bob's authorization and Alice's voucher; escrow pays Bob 0.8 USDT. Settlement pays the highest accepted voucher, which has been fully consumed in this example. |
-| Voucher to 1.2, then pay | Alice authorizes up to 1.2 USDT cumulatively and receives one more message, bringing delivered spend to 0.9 USDT. |
-| Close | Alice signs a close voucher through the SDK for the greater of delivered spend and the amount already settled: 0.9 USDT here. The relayer submits the close, escrow pays Bob another 0.1 USDT, and Alice receives a 1.1-USDT refund. |
+| `TRON_PAYER_PRIVATE_KEY` wallet | Gives 1 USDT |
+| `TRON_SESSION_ESCROW_ADDRESS` | Receives 1 USDT for this channel |
+| `TRON_RECIPIENT_ADDRESS` | Receives 0 USDT |
+| `TRON_RELAYER_PRIVATE_KEY` wallet | Pays transaction TRX/resource costs |
 
-Alice deposited **2 USDT**, received **nine messages**, paid Bob **0.9 USDT** in total, and recovered **1.1 USDT**. The channel is finalized. These totals assume the exact commands above; additional payments or settlement of a higher voucher change the result.
+```sh
+npm run session:inspect
+```
+
+Reads the result without moving funds. Expect:
+
+```text
+deposit:             1000000
+acceptedCumulative:  0
+spent:               0
+```
+
+Opening alone buys no message and authorizes no service credit.
+
+#### 3. Authorize credit, buy one message, and test replay
+
+```sh
+npm run session:voucher
+```
+
+The `TRON_PAYER_PRIVATE_KEY` wallet signs a voucher authorizing **0.4 USDT cumulatively**. No USDT moves; the merchant has an authorization it can later settle.
+
+```sh
+npm run session:pay
+```
+
+Delivers one message and records a **0.1-USDT service charge**. No USDT moves on-chain: the opening deposit remains in escrow and `TRON_RECIPIENT_ADDRESS` has received nothing yet. Expect:
+
+```text
+acceptedCumulative: 400000
+spent:              100000
+```
+
+Immediately test the same paid request again:
+
+```sh
+npm run session:replay
+```
+
+Expect **HTTP 409** and a nonzero command exit status. No additional message, service charge, or token transfer occurs.
+
+#### 4. Consume the remaining authorized credit
+
+```sh
+npm run session:stream
+```
+
+Attempts up to four messages, but only three fit in the remaining authorization. Expect three content events (another **0.3 USDT** of service charges), then `payment-need-voucher` with `requiredCumulative: "500000"`, and a final receipt with `spent: "400000"`.
+
+No USDT moves and no transaction is submitted. Alice has received four messages; escrow still holds her 1-USDT deposit and Bob has received 0 USDT on-chain.
+
+#### 5. Add another deposit and authorize more credit
+
+```sh
+npm run session:merge
+```
+
+Combines a **1-USDT top-up** with a voucher raising cumulative authorization to **0.8 USDT**. It does not deliver or charge for a message.
+
+| Address impacted | Change |
+| --- | --- |
+| `TRON_PAYER_PRIVATE_KEY` wallet | Gives another 1 USDT; total deposited is now 2 USDT |
+| `TRON_SESSION_ESCROW_ADDRESS` | Receives another 1 USDT; now holds 2 USDT for this channel |
+| `TRON_RECIPIENT_ADDRESS` | Receives 0 USDT |
+| `TRON_RELAYER_PRIVATE_KEY` wallet | Submits funding and pays transaction TRX/resource costs |
+
+```sh
+npm run session:inspect
+```
+
+Reads the updated state without moving funds. Expect:
+
+```text
+deposit:             2000000
+acceptedCumulative:  800000
+spent:               400000
+```
+
+```sh
+npm run session:stream
+```
+
+Delivers four more messages, recording another **0.4 USDT** of service charges. Expect `spent: "800000"` and eight messages delivered in total. No on-chain USDT movement occurs.
+
+Do not add a standalone `session:topup` to this sequence: total funding has reached the configured 2-USDT cap. On a different channel with room below the cap, a default top-up transfers 1 USDT from the payer to escrow, with transaction costs paid by the relayer; it does not increase voucher authorization.
+
+#### 6. Settle the merchant's payment
+
+```sh
+npm run session:settle
+```
+
+The merchant signs using `TRON_PAYEE_PRIVATE_KEY`; the relayer submits that authorization with the payer's voucher. This operator command requires `MPP_SECRET_KEY`. Settlement pays the highest accepted cumulative voucher less anything already settled. Here, all 0.8 USDT of authorized credit has been consumed.
+
+| Address impacted | Change |
+| --- | --- |
+| `TRON_SESSION_ESCROW_ADDRESS` | Gives 0.8 USDT; retains 1.2 USDT for this channel |
+| `TRON_RECIPIENT_ADDRESS` | Receives 0.8 USDT |
+| `TRON_PAYER_PRIVATE_KEY` wallet | No new balance change; funds came from earlier deposits |
+| `TRON_RELAYER_PRIVATE_KEY` wallet | Pays transaction TRX/resource costs |
+
+The channel stays open. `deposit` remains `2000000` because it records total funding; it does not decrease with settlement.
+
+#### 7. Buy one more message and close
+
+```sh
+npm run session:voucher -- 1200000
+```
+
+The payer authorizes **1.2 USDT cumulatively**, not an additional 1.2 USDT. No funds move. The merchant could settle this higher authorization even before all of it is consumed.
+
+```sh
+npm run session:pay
+```
+
+Delivers a ninth message and records another **0.1-USDT service charge**. No on-chain USDT moves. Expect:
+
+```text
+acceptedCumulative: 1200000
+spent:              900000
+```
+
+Proceed directly to close without another settlement to obtain the totals below:
+
+```sh
+npm run session:close
+```
+
+The payer signs a close voucher for the greater of delivered spend and the amount already settled: **0.9 USDT** here. The merchant signs the close authorization, and the relayer submits it. Escrow pays the additional amount owed, refunds the remainder, and finalizes the channel.
+
+| Address impacted | Change |
+| --- | --- |
+| `TRON_RECIPIENT_ADDRESS` | Receives another 0.1 USDT; total received is 0.9 USDT |
+| `TRON_PAYER_PRIVATE_KEY` wallet | Receives a 1.1-USDT refund |
+| `TRON_SESSION_ESCROW_ADDRESS` | Gives the remaining 1.2 USDT; nothing remains attributable to this channel |
+| `TRON_RELAYER_PRIVATE_KEY` wallet | Pays transaction TRX/resource costs |
+
+```sh
+npm run session:inspect
+```
+
+Reads the finalized channel without moving funds.
+
+For this exact sequence:
+
+| Result | Amount |
+| --- | --- |
+| Total given by `TRON_PAYER_PRIVATE_KEY` wallet to escrow | 2 USDT |
+| Received by `TRON_RECIPIENT_ADDRESS` at settlement | 0.8 USDT |
+| Received by `TRON_RECIPIENT_ADDRESS` at close | 0.1 USDT |
+| Refunded to `TRON_PAYER_PRIVATE_KEY` wallet | 1.1 USDT |
+| Payer's net USDT cost / merchant's total USDT receipts | **0.9 USDT** |
+| Messages delivered | **9** |
+
+TRX/resource costs are separate from these USDT totals. Additional messages or settlement of a higher voucher change the result. See [Session recovery](#session-recovery) to test persistence, uncertain submissions, and forced withdrawal.
 
 ### Understand session server logs
 
@@ -334,8 +550,84 @@ The tokens are held in escrow; the merchant has received no payment yet. Opening
 
 ### Session recovery
 
-The client saves pending credentials before submitting them, and the server saves its accounting in `SESSION_STATE_DIR` (default `.data/session`). Use a separate directory when changing wallets, token, escrow, or server port.
+The client saves pending credentials before submitting them, and the server saves its accounting in `SESSION_STATE_DIR` (default `.data/session`). Use a separate directory when changing wallets, token, escrow, or server port. Preserve previous journals.
 
-After a network failure or HTTP 503, run `session:inspect`, then `session:retry`. If a paid request has expired, retry stops because the content may already have been delivered; inspect and reconcile it before making another paid request. A transaction with no known hash also needs investigation. Do not delete the journals to force another payment.
+#### Test persistence during an active channel
 
-For forced close, run `session:request-close`, wait for the escrow's reported grace period, and then run `session:withdraw`. The built-in adapter cannot automatically confirm an external forced withdrawal in server accounting. See [Session testing](docs/SESSION_TESTING.md) for recovery details, limitations, and the full forced-close procedure.
+Before closing the channel, stop the server and restart it with the same configuration, SDK build, and state directory:
+
+```sh
+npm run session:server
+```
+
+Reloads the saved accounting and resumes service. Restarting itself transfers no USDT and submits no transaction. Continue the lifecycle and check that the channel, spending, and replay records are retained.
+
+#### Recover an uncertain operation
+
+After a network failure or HTTP 503:
+
+```sh
+npm run session:inspect
+```
+
+Reads the on-chain channel and local pending-operation information. No USDT moves.
+
+```sh
+npm run session:retry
+```
+
+Resumes the saved request or checks a saved payer-transaction hash. The wallet impact depends on the original operation: a pending open may complete its original payer-to-escrow deposit; a pending close may complete its original merchant payment and payer refund. Retry preserves the original authorization and does not create a second deposit. Checking a saved payer-transaction hash does not broadcast that transaction again.
+
+If a paid request has expired, retry stops because content may already have been delivered; inspect and reconcile it before making another paid request. A transaction with no known hash also needs investigation. Do not delete the journals to force another payment.
+
+```sh
+npm run session:reconcile
+```
+
+Uses `MPP_SECRET_KEY` to ask the server to reconcile funding, settlement, or close information with confirmed transaction results. It broadcasts no transaction, transfers no USDT, and delivers no content. HTTP 200 means the check ran; inspect `state.operation` and `state.closed` to determine whether recovery is complete. Confirmed funding may still need `session:retry` to finish initializing accounting or accepting the voucher.
+
+#### Optionally test forced withdrawal on a fresh channel
+
+After completing the cooperative-close walkthrough, open a fresh channel. Keep enough USDT in the payer wallet for another 1-USDT deposit and enough Nile TRX/resources for approval and forced-close transactions.
+
+```sh
+npm run session:approve
+```
+
+Sets the `TRON_PAYER_PRIVATE_KEY` wallet's allowance to `TRON_PERMIT2_ADDRESS` to 2 USDT, or skips if already equal. No USDT moves; the payer pays TRX/resource costs if a transaction is needed. If a different nonzero allowance remains, resolve pending operations, revoke it, then approve again.
+
+```sh
+npm run session:open
+```
+
+Creates a fresh channel and transfers **1 USDT from the `TRON_PAYER_PRIVATE_KEY` wallet to `TRON_SESSION_ESCROW_ADDRESS`**. The `TRON_RELAYER_PRIVATE_KEY` wallet submits funding and pays transaction costs. `TRON_RECIPIENT_ADDRESS` receives nothing.
+
+```sh
+npm run session:request-close
+```
+
+The `TRON_PAYER_PRIVATE_KEY` wallet submits an on-chain close request directly to escrow and pays its TRX/resource costs. This starts the grace period; no USDT is refunded yet. No merchant signature or running session server is required for this command or withdrawal.
+
+```sh
+npm run session:inspect
+```
+
+Reads the close-request timestamp and grace period without moving funds. Wait until the on-chain close-request timestamp plus the grace period has elapsed: 15 minutes for a 900-second deployment.
+
+```sh
+npm run session:withdraw
+```
+
+The payer submits withdrawal and pays its TRX/resource costs. If no settlement occurred in this fresh channel, **escrow gives 1 USDT back to the `TRON_PAYER_PRIVATE_KEY` wallet**, and `TRON_RECIPIENT_ADDRESS` receives 0 USDT. If the merchant settled during the grace period, only the remaining unsettled balance is refunded. A withdrawal attempted too early fails simulation before broadcast.
+
+```sh
+npm run session:inspect
+```
+
+Reads the on-chain finalization without moving funds.
+
+```sh
+npm run session:reconcile
+```
+
+Checks server accounting without moving funds; this command needs the session server. The built-in adapter cannot automatically confirm an external forced withdrawal in server accounting, so on-chain finalization may coexist with server records that remain open. See [Session testing](docs/SESSION_TESTING.md) for recovery details and adapter limitations.
