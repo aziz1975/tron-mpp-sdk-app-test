@@ -225,6 +225,36 @@ For this exact sequence, expect:
 
 Alice deposited **2 USDT**, received **nine messages**, paid Bob **0.9 USDT** in total, and recovered **1.1 USDT**. The channel is finalized. These totals assume the exact commands above; additional payments or settlement of a higher voucher change the result.
 
+### Understand session server logs
+
+One CLI command can make several HTTP requests. For example, a successful `npm run session:open` normally produces these two lines in the **server terminal**, with timestamps and durations omitted here:
+
+```text
+POST /session -> 402 authorization=absent receipt=absent
+POST /session -> 200 authorization=present receipt=present
+```
+
+The first request asks for the session payment terms without submitting a credential. **HTTP 402 is expected at this stage**: the server returns a payment challenge, and no tokens move. The client validates the terms, signs the opening authorization, and sends a second request with that credential. The relayer funds the channel, and the server returns HTTP 200 with a payment receipt after confirmation.
+
+`authorization=present` means the request included an authorization header; the log does not print its contents. `receipt=present` means the response includes a payment receipt. Each real log line also includes a timestamp and `durationMs`. A 200 reports a successful request; commands such as voucher updates and paid messages still send no blockchain transaction.
+
+The main requests for each command are:
+
+| Command | Expected session-server requests |
+| --- | --- |
+| `session:challenge` | `POST /session` returns 402 and stops after checking the terms. |
+| `session:open`, `session:topup`, `session:close` | `POST /session` returns 402 for the terms, then a signed POST normally returns 200. |
+| `session:voucher`, `session:merge` | `HEAD /session` returns 402 for the terms, then a signed HEAD normally returns 200. |
+| `session:pay`, `session:stream` | `GET /session` returns 402 for the terms, then a signed GET normally returns 200. |
+| `session:settle` | `POST /session/settle` returns the operator action's result, normally 200; it does not first fetch a payment challenge. |
+| `session:reconcile` | `POST /session/reconcile` returns the recovery check's result, normally 200; it does not first fetch a payment challenge. |
+| `session:replay` | Resends the last successful request with its original method; a paid-request or opening replay normally returns 409, while a repeated voucher update can return 200. |
+| `session:retry` | Resends a saved HTTP request and logs its result; an expired management request may first fetch a fresh 402 challenge. Checking a saved payer-transaction hash makes no session-server request. |
+| `session:inspect`, `session:approve`, `session:revoke`, `session:request-close`, `session:withdraw` | Make no session-server request: they read local state or communicate directly with TRON. Check their output in the client terminal. |
+| `session:server` | Starts the server and logs incoming requests; startup itself does not request a payment challenge. |
+
+Commands may also read `GET /session/state`, producing additional log lines. If the client rejects the terms, it stops before sending the signed request. Insufficient credit or an unresolved transaction can also prevent a successful 200 result. A stream can return HTTP 200 and later emit `payment-need-voucher` when credit runs out; inspect the client stream output and final receipt for that result.
+
 ### Session commands
 
 Run each with `npm run`, for example `npm run session:open`. The amounts below assume the default settings and a six-decimal token: `1000000` atomic units is 1 USDT.
@@ -254,11 +284,11 @@ When reading the output, keep these amounts separate:
 
 **`session:open` — Create a payment channel and deposit the payer's tokens into escrow.** It performs these steps:
 
-1. Fetches and validates the server's session payment terms.
+1. Makes an unpaid `POST /session`, receives the expected HTTP 402 challenge, and validates the server's session payment terms.
 2. Checks the escrow, payer's token balance, and Permit2 allowance.
 3. Uses the payer's key to sign permission for the deposit and the opening request.
 4. Saves the request and channel ID locally, then sends the request to the server. The server's relayer submits the transaction and pays its TRX/resource costs.
-5. Waits for the deposit transaction to be confirmed and reports the channel ID and payment receipt.
+5. Waits for the deposit transaction to be confirmed, then receives HTTP 200 and reports the channel ID and payment receipt. See [Understand session server logs](#understand-session-server-logs) for the two-request example.
 
 The deposit comes from `SESSION_DEPOSIT_ATOMIC`: `1000000` means 1 USDT. Immediately after a successful first open:
 
