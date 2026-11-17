@@ -173,7 +173,7 @@ Whenever this guide says a `*_PRIVATE_KEY` **wallet**, it means the address deri
 | `TRON_RECIPIENT_ADDRESS` (Bob) | Merchant address receiving USDT at settlement and cooperative close. |
 | `TRON_PAYEE_PRIVATE_KEY` wallet | Must be the wallet at `TRON_RECIPIENT_ADDRESS`. Signs settlement and cooperative-close authorizations off-chain; signing alone costs no TRX/resources. |
 | `TRON_RELAYER_PRIVATE_KEY` wallet | Submits opening, top-up, settlement, and cooperative-close transactions and pays their TRX/resource costs. Can be separate from Bob's receiving wallet. |
-| `TRON_PERMIT2_ADDRESS` | Contract Alice approves to transfer authorized USDT from her wallet into escrow. Approval grants permission; it does not send USDT to Permit2. |
+| `TRON_PERMIT2_ADDRESS` | Contract Alice approves to transfer authorized USDT from her wallet into escrow. Successful funding checks her signed permit and consumes its one-time nonce in Permit2. USDT moves directly from payer to escrow; Permit2 holds none of the deposit. |
 | `TRON_PERMIT2_SPENDER_ADDRESS` | Charge-only setting; unused by session intent. The escrow contract is the Permit2 spender for sessions. |
 | `TRON_SESSION_ESCROW_ADDRESS` | Contract holding channel deposits, paying the merchant, and refunding the payer. Set in the SDK's `.env` and embedded during its build. |
 | `TRON_TOKEN_ADDRESS` | USDT token contract recording balances and allowances. |
@@ -207,6 +207,22 @@ Whenever this guide says a `*_PRIVATE_KEY` **wallet**, it means the address deri
 
 4. Fund the `TRON_PAYER_PRIVATE_KEY` wallet with at least **2 Nile USDT** and sufficient Nile TRX/resources for approval. Fund the `TRON_RELAYER_PRIVATE_KEY` wallet with Nile TRX/resources for its sponsored transactions. Merchant authorization signatures alone require no TRX/resources. Both charge and session share the payer's token allowance to Permit2, so resolve pending payments before changing it.
 5. Use a fresh channel with no unresolved operations. Use a separate `SESSION_STATE_DIR` when changing wallets, token, escrow, or server port, and preserve previous journals. The balance examples assume Alice and Bob are different wallets. An escrow may hold other channels too; the escrow balances below refer only to this channel's remaining funds.
+
+#### Permit2 contract impact by command
+
+There are two separate pieces of state: the payer's **token allowance to Permit2**, stored in `TRON_TOKEN_ADDRESS`, and **used permit nonces**, stored in `TRON_PERMIT2_ADDRESS`. A nonce identifies a one-time funding authorization. This session flow uses Permit2's signature-transfer mechanism; it does not create a persistent spender allowance inside Permit2.
+
+| Command | Impact involving `TRON_PERMIT2_ADDRESS` | USDT movement and transaction costs |
+| --- | --- | --- |
+| `session:approve` | Calls `approve(TRON_PERMIT2_ADDRESS, amount)` on the token contract. Sets the payer's token allowance to Permit2 to 2 USDT by default. Does not consume a permit nonce or change Permit2's stored funding state. | No USDT transfer or Permit2 balance change. Payer pays transaction costs if an approval is sent. |
+| `session:open` | Escrow calls Permit2's `permitWitnessTransferFrom`. Permit2 verifies the payer's signature, deadline, amount, and witness-bound authorization for the escrow spender, then consumes the permit nonce when funding succeeds. | Permit2 calls the token's `transferFrom` to move 1 USDT directly from payer to escrow. Permit2 receives 0 USDT; relayer pays transaction costs. |
+| `session:topup` | Uses a fresh signed Permit2 authorization bound to the existing channel. A successful additional deposit consumes that permit's nonce. | Default 1 USDT moves directly from payer to escrow. Permit2 receives 0 USDT; relayer pays transaction costs. |
+| `session:merge` | Its top-up uses Permit2 exactly as `session:topup` does, consuming a fresh permit nonce on successful funding. The higher spending voucher is handled by the session, separately from Permit2 funding. | Default 1 USDT moves directly from payer to escrow. Permit2 receives 0 USDT; relayer pays transaction costs. |
+| `session:revoke` | Sets the token allowance to Permit2 to zero on the token contract. Does not clear Permit2's used nonces or cancel an existing funded channel. | No USDT transfer or Permit2 balance change. Payer pays transaction costs if a revocation is sent. |
+
+For a token that decrements finite allowances on `transferFrom`, the walkthrough's allowance is **2 USDT after approval → 1 USDT after opening → 0 after merge**, assuming no other payments or allowance changes. The token contract controls allowance behavior; check the actual value with `session:inspect`. Permit2's USDT balance does not increase at any of these steps. Signing a permit alone changes no on-chain state; a reverted funding transaction does not consume its nonce.
+
+Voucher updates, paid messages, and streaming do not consume Permit2 funding nonces or transfer tokens. Settlement, cooperative close, and forced withdrawal transfer tokens already held by escrow without pulling more from the payer through Permit2. Commands may still read Permit2 during deployment checks; those reads change no state.
 
 ### Test a session
 
@@ -264,6 +280,8 @@ npm run session:approve
 
 The `TRON_PAYER_PRIVATE_KEY` wallet grants `TRON_PERMIT2_ADDRESS` a **2-USDT allowance**. No USDT moves to Permit2, escrow, or the merchant. The payer submits the approval transaction and pays its TRX/resource costs; if the allowance already equals the target, no transaction is sent.
 
+**Permit2 impact:** this approval is recorded in the USDT contract at `TRON_TOKEN_ADDRESS`, with Permit2 as the approved spender of the payer's tokens. Permit2's own nonce state and USDT balance do not change.
+
 If a different nonzero allowance exists, resolve pending charge/session operations, run `npm run session:revoke`, then approve again. Revocation sets the allowance to zero, transfers no USDT, and costs the payer TRX/resources if a transaction is needed.
 
 ```sh
@@ -282,8 +300,11 @@ The payer signs the opening and funding authorizations. The relayer submits the 
 | --- | --- |
 | `TRON_PAYER_PRIVATE_KEY` wallet | Gives 1 USDT |
 | `TRON_SESSION_ESCROW_ADDRESS` | Receives 1 USDT for this channel |
+| `TRON_PERMIT2_ADDRESS` | Verifies the signed funding permit and consumes its nonce on success. Moves the payer's USDT directly to escrow; its own USDT balance changes by 0. |
 | `TRON_RECIPIENT_ADDRESS` | Receives 0 USDT |
 | `TRON_RELAYER_PRIVATE_KEY` wallet | Pays transaction TRX/resource costs |
+
+**Permit2 call path:** relayer → escrow → `TRON_PERMIT2_ADDRESS` → USDT contract. Escrow is the spender bound into the signed permit; the relayer submits the transaction. With standard finite-allowance behavior, this 1-USDT deposit reduces the payer's token allowance to Permit2 from 2 USDT to 1 USDT.
 
 ```sh
 npm run session:inspect
@@ -348,8 +369,11 @@ Combines a **1-USDT top-up** with a voucher raising cumulative authorization to 
 | --- | --- |
 | `TRON_PAYER_PRIVATE_KEY` wallet | Gives another 1 USDT; total deposited is now 2 USDT |
 | `TRON_SESSION_ESCROW_ADDRESS` | Receives another 1 USDT; now holds 2 USDT for this channel |
+| `TRON_PERMIT2_ADDRESS` | Verifies a fresh channel-bound funding permit and consumes its nonce on success. Its own USDT balance changes by 0. |
 | `TRON_RECIPIENT_ADDRESS` | Receives 0 USDT |
 | `TRON_RELAYER_PRIVATE_KEY` wallet | Submits funding and pays transaction TRX/resource costs |
+
+**Permit2 impact:** escrow uses the new permit to pull the additional 1 USDT directly from the payer. With standard finite-allowance behavior, the remaining token allowance to Permit2 falls from 1 USDT to zero. The voucher increase to 0.8 USDT does not itself change Permit2 state.
 
 ```sh
 npm run session:inspect
@@ -370,6 +394,8 @@ npm run session:stream
 Delivers four more messages, recording another **0.4 USDT** of service charges. Expect `spent: "800000"` and eight messages delivered in total. No on-chain USDT movement occurs.
 
 Do not add a standalone `session:topup` to this sequence: total funding has reached the configured 2-USDT cap. On a different channel with room below the cap, a default top-up transfers 1 USDT from the payer to escrow, with transaction costs paid by the relayer; it does not increase voucher authorization.
+
+For that standalone `session:topup`, escrow calls `TRON_PERMIT2_ADDRESS` with a fresh channel-bound permit. Successful funding consumes its nonce and uses the payer's remaining token allowance; Permit2's USDT balance changes by zero. The default 1-USDT top-up needs at least 1 USDT of remaining allowance and payer balance.
 
 #### 6. Settle the merchant's payment
 
@@ -494,7 +520,7 @@ When reading the output, keep these amounts separate:
 
 #### Approve token access and open a channel
 
-- **`session:approve` — Give Permit2 permission to move tokens for session funding.** It sets the token allowance to exactly `SESSION_MAX_DEPOSIT_ATOMIC`, which is 2 USDT with the defaults. The payer submits the approval transaction and pays its TRX/resource costs, but no tokens move into escrow yet. If the allowance already equals the target, no transaction is sent. If a different nonzero allowance exists, resolve pending operations and run `session:revoke` before approving again.
+- **`session:approve` — Give Permit2 permission to move tokens for session funding.** It calls the token contract's `approve` with `TRON_PERMIT2_ADDRESS` and sets the allowance to exactly `SESSION_MAX_DEPOSIT_ATOMIC`, which is 2 USDT with the defaults. The allowance is stored in the token contract; Permit2's own nonce state and USDT balance do not change. The payer submits the approval transaction and pays its TRX/resource costs, but no tokens move into escrow yet. If the allowance already equals the target, no transaction is sent. If a different nonzero allowance exists, resolve pending operations and run `session:revoke` before approving again.
 
 - **`session:revoke` — Remove Permit2's remaining token allowance.** The payer sends a transaction setting that allowance to zero and pays its TRX/resource costs. This prevents further Permit2 funding until another approval is granted; it does not close a channel or refund tokens already in escrow. Charge and session share this token-to-Permit2 allowance, so resolve pending payments before changing it.
 
@@ -503,7 +529,7 @@ When reading the output, keep these amounts separate:
 1. Makes an unpaid `POST /session`, receives the expected HTTP 402 challenge, and validates the server's session payment terms.
 2. Checks the escrow, payer's token balance, and Permit2 allowance.
 3. Uses the payer's key to sign permission for the deposit and the opening request.
-4. Saves the request and channel ID locally, then sends the request to the server. The server's relayer submits the transaction and pays its TRX/resource costs.
+4. Saves the request and channel ID locally, then sends the request to the server. The server's relayer submits the escrow transaction and pays its TRX/resource costs. Escrow calls `TRON_PERMIT2_ADDRESS`, which verifies the funding permit, consumes its nonce on success, and calls the token contract to move USDT directly from payer to escrow. Permit2 receives no USDT.
 5. Waits for the deposit transaction to be confirmed, then receives HTTP 200 and reports the channel ID and payment receipt. See [Understand session server logs](#understand-session-server-logs) for the two-request example.
 
 The deposit comes from `SESSION_DEPOSIT_ATOMIC`: `1000000` means 1 USDT. Immediately after a successful first open:
@@ -526,9 +552,9 @@ The tokens are held in escrow; the merchant has received no payment yet. Opening
 
 #### Add funds and collect payments
 
-- **`session:topup` — Put more of the payer's tokens into the existing channel.** It adds `SESSION_TOP_UP_ATOMIC`, or an explicit amount such as `npm run session:topup -- 500000` to add 0.5 USDT. The payer signs the funding permission; the relayer submits the transaction and pays its TRX/resource costs. This increases the deposit without raising the voucher or charging for a message. Total channel funding must stay within `SESSION_MAX_DEPOSIT_ATOMIC`, and Permit2 needs enough remaining allowance.
+- **`session:topup` — Put more of the payer's tokens into the existing channel.** It adds `SESSION_TOP_UP_ATOMIC`, or an explicit amount such as `npm run session:topup -- 500000` to add 0.5 USDT. The payer signs a fresh channel-bound Permit2 funding permit; the relayer submits the escrow transaction and pays its TRX/resource costs. Escrow calls `TRON_PERMIT2_ADDRESS`; successful funding consumes the permit nonce and moves USDT directly from payer to escrow using the token allowance. Permit2 receives no USDT. This increases the deposit without raising the voucher or charging for a message. Total channel funding must stay within `SESSION_MAX_DEPOSIT_ATOMIC`, and the payer's token allowance to Permit2 must cover the additional deposit.
 
-- **`session:merge` — Add a deposit and authorize more spending together.** It adds the configured `SESSION_TOP_UP_ATOMIC` and raises the cumulative voucher in one server request. By default, that means 1 USDT of additional funding and 0.4 USDT of additional authorization. `npm run session:merge -- 1200000` still adds the configured top-up, but sets the authorized total to 1.2 USDT. The relayer submits the funding transaction and pays its TRX/resource costs; no message is charged by this command.
+- **`session:merge` — Add a deposit and authorize more spending together.** It adds the configured `SESSION_TOP_UP_ATOMIC` and raises the cumulative voucher in one server request. By default, that means 1 USDT of additional funding and 0.4 USDT of additional authorization. `npm run session:merge -- 1200000` still adds the configured top-up, but sets the authorized total to 1.2 USDT. Its funding uses a fresh channel-bound Permit2 permit, consumes that nonce on success, and moves the deposit directly from payer to escrow using the token allowance. `TRON_PERMIT2_ADDRESS` receives no USDT; the voucher increase itself does not change Permit2 state. The relayer submits the funding transaction and pays its TRX/resource costs; no message is charged by this command.
 
 - **`session:settle` — Transfer an authorized payment from escrow to the merchant while keeping the channel open.** It collects up to the highest accepted cumulative voucher, less anything already settled. For example, if the voucher total is 0.8 USDT and 0.3 USDT was settled earlier, the merchant receives another 0.5 USDT. The merchant signs the authorization, and the relayer submits the transaction and pays its TRX/resource costs. This is an operator command requiring `MPP_SECRET_KEY`; the voucher total can exceed the price of messages already consumed. If the accepted voucher has already been fully settled, it reports that there is nothing to settle.
 
