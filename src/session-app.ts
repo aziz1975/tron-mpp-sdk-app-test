@@ -40,8 +40,16 @@ export async function createSessionApp(config: SessionServerConfig, dependencies
     const payment = Mppx.create({ secretKey: config.mppSecretKey, methods: [method] })
     const paid = Mppx.toNodeListener(payment.session({ amount: config.unitAmount, unitType: 'message', suggestedDeposit: config.deposit }))
     const server = createServer(async (request, response) => {
+      const startedAt = performance.now()
+      const hasAuthorization = Boolean(request.headers.authorization)
       try {
         const url = new URL(request.url ?? '/', 'http://localhost')
+        response.once('finish', () => {
+          console.log(`${new Date().toISOString()} ${request.method ?? 'UNKNOWN'} ${url.pathname} -> ${response.statusCode}` +
+            ` authorization=${hasAuthorization ? 'present' : 'absent'}` +
+            ` receipt=${response.hasHeader('payment-receipt') ? 'present' : 'absent'}` +
+            ` durationMs=${Math.round(performance.now() - startedAt)}`)
+        })
         if (request.method === 'GET' && url.pathname === '/health') {
           json(response, 200, { status: 'ok', intent: 'session', credentialTypes: [config.credentialType], chainId: config.chainId,
             currency: config.tokenAddress, recipient: config.recipientAddress,

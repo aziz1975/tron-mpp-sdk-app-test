@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { Challenge } from 'mppx'
 import { Charge, normalizeAddress } from 'tron-mpp-sdk'
 import { loadSharedConfig } from './config.js'
+import { jsonForDisplay } from './display.js'
 
 const config = loadSharedConfig()
 const response = await fetch(`http://127.0.0.1:${config.port}/premium`)
@@ -18,5 +19,5 @@ if (config.permit2) {
   assert.equal(normalizeAddress(request.methodDetails.permit2Address ?? ''), config.permit2.address)
   assert.equal(normalizeAddress(request.methodDetails.spender ?? ''), config.permit2.spender)
 }
-console.log(JSON.stringify(challenge, null, 2))
+console.log(jsonForDisplay(challenge))
 console.log('Challenge inspected. No credential was signed or submitted.')

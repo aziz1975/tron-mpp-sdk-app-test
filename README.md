@@ -53,6 +53,8 @@ The app is a test harness. Its charge journal is in memory, and its session file
 
    `check` checks TypeScript. `test` runs automated tests with test keys and simulated chain receipts; it does not load `.env`, contact Nile, or spend funds. A live test is still needed to check your deployed contracts and configuration.
 
+Command output and startup logs display wallet and contract addresses in TRON Base58 (`T...`) format, including nested session channels and challenges. This formatting applies to console output; signing, protocol data, stored state, transaction hashes, and signatures retain their existing formats.
+
 Amounts in `.env` are whole **atomic units**, not decimal numbers. USDT has six decimals: `1000000` means 1 USDT, and `100000` means 0.1 USDT.
 
 ## Charge intent: pay once
@@ -172,6 +174,16 @@ A stream can stop and request a higher voucher when its authorized credit runs o
 
 ### Test a session
 
+For example, imagine **Alice buys messages from Bob's API for 0.1 USDT each**, using a channel instead of making a separate on-chain payment for every message:
+
+- **Alice is the buyer and payer.** Her wallet owns the USDT and signs funding authorizations and cumulative vouchers. Configure her key as `TRON_PAYER_PRIVATE_KEY`. She pays the TRX/resource costs for token approval and, if needed, forced-close transactions.
+- **Bob is the merchant and payee.** His wallet receives settled payments. Configure its address as `TRON_RECIPIENT_ADDRESS` and its signing key as `TRON_PAYEE_PRIVATE_KEY`, unless the relayer already uses that same wallet. Bob's key authorizes settlement and cooperative close.
+- **Bob's service operates the relayer.** Configure its key as `TRON_RELAYER_PRIVATE_KEY`. It submits the opening deposit, top-ups, settlement, and cooperative close, and sponsors their TRX/resource costs. It can be a separate wallet from Bob's receiving wallet.
+- **The escrow holds Alice's deposit for the channel.** It pays Bob when payments are settled and refunds the unsettled remainder to Alice when the channel closes. Its address comes from the SDK's `.env` during the SDK build; the app does not supply it.
+- **Permit2 transfers the authorized funding into escrow.** Alice approves the contract at `TRON_PERMIT2_ADDRESS`; `session:approve` sets that allowance to `SESSION_MAX_DEPOSIT_ATOMIC` (2 USDT with these settings). The escrow is the Permit2 spender for sessions; the charge-only `TRON_PERMIT2_SPENDER_ADDRESS` is not used here.
+
+For the sequence below, Alice needs at least 2 Nile test USDT, and both Alice and the relayer need sufficient Nile TRX/resources for their transactions. Use a fresh channel with no unresolved operations and the default six-decimal amounts. A deposit funds the channel; a voucher authorizes a cumulative amount Bob may claim. Voucher updates and individual message requests do not send blockchain transactions.
+
 Start the server in one terminal:
 
 ```sh
@@ -197,30 +209,98 @@ npm run session:close
 npm run session:inspect
 ```
 
-With the default six-decimal amounts, the first voucher authorizes 0.4 USDT. The single paid message uses 0.1; the first stream delivers three more messages, then asks for a higher voucher and reports 0.4 spent. Merge adds 1 USDT to the deposit and raises the voucher to 0.8 USDT. The next stream can deliver four more messages. Settlement pays the highest accepted voucher; the later voucher and payment demonstrate continued use before closing. Closing settles at least the delivered and already settled amounts and refunds the remainder.
+For this exact sequence, expect:
+
+| Step | What happens to Alice's funds and Bob's payments |
+| --- | --- |
+| Approve | Alice grants Permit2 a 2-USDT allowance; no tokens move yet. |
+| Open | The relayer submits Alice's signed authorization; 1 USDT moves from Alice to escrow. Bob has received nothing yet. |
+| First voucher | Alice authorizes up to 0.4 USDT cumulatively; no tokens move. |
+| Pay, then first stream | Bob delivers one message and then three more, bringing delivered spend to 0.4 USDT. The stream requests a higher voucher before delivering a fifth message. |
+| Merge | Another 1 USDT moves from Alice to escrow, bringing total deposits to 2 USDT; Alice also raises her cumulative voucher to 0.8 USDT. |
+| Second stream | Bob delivers four more messages, bringing delivered spend to 0.8 USDT. |
+| Settle | The relayer submits Bob's authorization and Alice's voucher; escrow pays Bob 0.8 USDT. Settlement pays the highest accepted voucher, which has been fully consumed in this example. |
+| Voucher to 1.2, then pay | Alice authorizes up to 1.2 USDT cumulatively and receives one more message, bringing delivered spend to 0.9 USDT. |
+| Close | Alice signs a close voucher through the SDK for the greater of delivered spend and the amount already settled: 0.9 USDT here. The relayer submits the close, escrow pays Bob another 0.1 USDT, and Alice receives a 1.1-USDT refund. |
+
+Alice deposited **2 USDT**, received **nine messages**, paid Bob **0.9 USDT** in total, and recovered **1.1 USDT**. The channel is finalized. These totals assume the exact commands above; additional payments or settlement of a higher voucher change the result.
 
 ### Session commands
 
-Run each with `npm run`, for example `npm run session:open`.
+Run each with `npm run`, for example `npm run session:open`. The amounts below assume the default settings and a six-decimal token: `1000000` atomic units is 1 USDT.
 
-- `session:server` — starts the session server and checks the escrow configuration.
-- `session:inspect` — reads deployment checks, balance, allowance, channel, receipt, and pending operation.
-- `session:challenge` — checks the HTTP 402 terms without signing or paying.
-- `session:approve` — grants Permit2 the configured maximum deposit allowance; sends a transaction but transfers no tokens. If a different nonzero allowance exists, revoke it first.
-- `session:revoke` — clears the remaining Permit2 allowance; sends a transaction.
-- `session:open` — signs the opening request and funds escrow; it does not buy service credit.
-- `session:voucher` — raises the cumulative amount the merchant may claim. By default it adds four message units; `session:voucher -- 600000` sets the total to 0.6 USDT.
-- `session:pay` — receives one JSON message and records one unit of spending.
-- `session:stream` — receives up to `SESSION_STREAM_UNITS` messages, charging before each one, and returns a final receipt.
-- `session:topup` — adds the configured amount to escrow without increasing the voucher. For example, `session:topup -- 500000` adds 0.5 USDT.
-- `session:merge` — adds the configured top-up and raises the voucher in one request. `session:merge -- 1200000` sets the voucher total to 1.2 USDT.
-- `session:settle` — operator action that settles the highest accepted voucher on-chain.
-- `session:close` — finalizes the channel, settles at least what was delivered or already settled, and refunds the remainder.
-- `session:replay` — resends the last successful credential to test replay handling; it does not create a new permit. A paid request or open is rejected, while a repeated voucher update can be accepted without billing again.
-- `session:retry` — retries a saved pending request or checks a saved payer transaction hash, without creating a second deposit.
-- `session:reconcile` — operator action that checks the state of an uncertain operation; inspect the returned state to see whether it is resolved.
-- `session:request-close` — starts the payer's forced-close grace period.
-- `session:withdraw` — after the grace period, lets the payer withdraw the unsettled remainder.
+When reading the output, keep these amounts separate:
+
+| Output field | Meaning in plain language |
+| --- | --- |
+| `deposit` | Total tokens put into this channel; it does not decrease when the merchant collects a payment. |
+| `acceptedCumulative` | Highest total payment authorized by an accepted spending voucher. |
+| `spent` | Total price of the messages the server has charged to this channel. |
+| `settled` / `settledOnChain` | Total tokens already transferred from escrow to the merchant. |
+
+#### Start the server and check the setup
+
+- **`session:server` — Start the merchant's session service.** It checks that the SDK's escrow matches the configured token, Permit2, network, and signing domains, then listens on `SESSION_PORT`. Leave it running while using commands that contact the server. It logs each completed HTTP request, including 402 challenges and successful 200 responses. Starting the server sends no blockchain transaction.
+
+- **`session:inspect` — See the current setup and saved channel.** It reads the payer's token balance, Permit2 allowance, escrow details, channel state, most recent saved receipt, and any unresolved operation. Addresses are displayed in Base58. It reads TRON and the local journal directly, so the session server does not need to be running. It signs nothing and sends no blockchain transaction.
+
+- **`session:challenge` — Check what the server wants before agreeing to pay.** It makes an unpaid request to `/session`, expects HTTP 402, and validates the network, token, merchant, SDK escrow, Permit2, credential type, price, and expiry. It prints those terms without signing, opening a channel, or transferring tokens. The session server must be running; a logged 402 is expected for this command.
+
+#### Approve token access and open a channel
+
+- **`session:approve` — Give Permit2 permission to move tokens for session funding.** It sets the token allowance to exactly `SESSION_MAX_DEPOSIT_ATOMIC`, which is 2 USDT with the defaults. The payer submits the approval transaction and pays its TRX/resource costs, but no tokens move into escrow yet. If the allowance already equals the target, no transaction is sent. If a different nonzero allowance exists, resolve pending operations and run `session:revoke` before approving again.
+
+- **`session:revoke` — Remove Permit2's remaining token allowance.** The payer sends a transaction setting that allowance to zero and pays its TRX/resource costs. This prevents further Permit2 funding until another approval is granted; it does not close a channel or refund tokens already in escrow. Charge and session share this token-to-Permit2 allowance, so resolve pending payments before changing it.
+
+**`session:open` — Create a payment channel and deposit the payer's tokens into escrow.** It performs these steps:
+
+1. Fetches and validates the server's session payment terms.
+2. Checks the escrow, payer's token balance, and Permit2 allowance.
+3. Uses the payer's key to sign permission for the deposit and the opening request.
+4. Saves the request and channel ID locally, then sends the request to the server. The server's relayer submits the transaction and pays its TRX/resource costs.
+5. Waits for the deposit transaction to be confirmed and reports the channel ID and payment receipt.
+
+The deposit comes from `SESSION_DEPOSIT_ATOMIC`: `1000000` means 1 USDT. Immediately after a successful first open:
+
+```text
+deposit:             1000000
+acceptedCumulative:  0
+spent:               0
+```
+
+The tokens are held in escrow; the merchant has received no payment yet. Opening alone authorizes no paid messages. Next, use `session:voucher` to authorize spending and `session:pay` to request a message. Run `session:approve` first if the allowance is insufficient. An unresolved operation or an existing active saved channel must be handled before opening another channel.
+
+#### Authorize spending and receive messages
+
+- **`session:voucher` — Sign permission for a higher total payment from the channel.** It raises the cumulative amount the merchant may collect without moving tokens yet. By default, it adds `SESSION_STREAM_UNITS` times `SESSION_UNIT_AMOUNT_ATOMIC`: 0.4 USDT with the defaults. `npm run session:voucher -- 600000` sets the authorized total to 0.6 USDT; it does not add 0.6 USDT to the previous total. The total must fit the channel deposit and `SESSION_MAX_CUMULATIVE_ATOMIC`. Later settlement can collect the authorized amount, even if some messages have not been consumed. The command sends no blockchain transaction.
+
+- **`session:pay` — Request one paid message using existing authorized credit.** The server records a charge of `SESSION_UNIT_AMOUNT_ATOMIC` and returns the message and receipt. With the defaults, `spent` increases by 0.1 USDT. This uses credit already authorized by a voucher; it sends no blockchain transaction. If credit is insufficient, authorize a higher voucher first, adding a deposit if necessary.
+
+- **`session:stream` — Request several paid messages in one streamed response.** The server attempts up to `SESSION_STREAM_UNITS` messages and charges one unit before delivering each message. If authorized credit runs out, the stream emits `payment-need-voucher` and stops delivering content. Check the final receipt for the actual amount spent; the HTTP response can still be 200. It sends no blockchain transaction.
+
+#### Add funds and collect payments
+
+- **`session:topup` — Put more of the payer's tokens into the existing channel.** It adds `SESSION_TOP_UP_ATOMIC`, or an explicit amount such as `npm run session:topup -- 500000` to add 0.5 USDT. The payer signs the funding permission; the relayer submits the transaction and pays its TRX/resource costs. This increases the deposit without raising the voucher or charging for a message. Total channel funding must stay within `SESSION_MAX_DEPOSIT_ATOMIC`, and Permit2 needs enough remaining allowance.
+
+- **`session:merge` — Add a deposit and authorize more spending together.** It adds the configured `SESSION_TOP_UP_ATOMIC` and raises the cumulative voucher in one server request. By default, that means 1 USDT of additional funding and 0.4 USDT of additional authorization. `npm run session:merge -- 1200000` still adds the configured top-up, but sets the authorized total to 1.2 USDT. The relayer submits the funding transaction and pays its TRX/resource costs; no message is charged by this command.
+
+- **`session:settle` — Transfer an authorized payment from escrow to the merchant while keeping the channel open.** It collects up to the highest accepted cumulative voucher, less anything already settled. For example, if the voucher total is 0.8 USDT and 0.3 USDT was settled earlier, the merchant receives another 0.5 USDT. The merchant signs the authorization, and the relayer submits the transaction and pays its TRX/resource costs. This is an operator command requiring `MPP_SECRET_KEY`; the voucher total can exceed the price of messages already consumed. If the accepted voucher has already been fully settled, it reports that there is nothing to settle.
+
+- **`session:close` — Finish the channel, pay the merchant, and refund the remainder to the payer.** The payer signs a final voucher through the SDK for the greater of delivered spend and the amount already settled. The merchant authorizes the close; the relayer submits the transaction and pays its TRX/resource costs. Escrow pays any additional amount owed, refunds the unsettled remainder to the payer, and finalizes the channel. For example, a 2-USDT deposit closed at 0.9 USDT refunds 1.1 USDT. Further service requires a new channel.
+
+#### Check replay protection and recover uncertain results
+
+- **`session:replay` — Send the last successful signed request again to test duplicate handling.** It reuses the saved credential instead of creating a new Permit2 authorization. Replaying a paid request or opening request should return 409 without charging or depositing again; repeating a voucher update can return 200 without another charge. This is a deliberate test of a completed request, not the command for recovering an unresolved one.
+
+- **`session:retry` — Continue an operation whose outcome is still unresolved.** For a pending server request, it resends the saved credential; for a payer transaction with a saved hash, it checks that transaction's confirmation. It does not create a second deposit or broadcast the payer transaction again. It needs a saved pending operation; an expired paid request or a submission with no known hash requires investigation before continuing.
+
+- **`session:reconcile` — Ask the server to check its records against a known transaction's outcome.** It checks saved funding, settlement, or close information and can resolve accounting when confirmation is available. This operator command requires `MPP_SECRET_KEY`; it sends no blockchain transaction and does not deliver content. HTTP 200 means the check ran: inspect the returned operation and channel state to see whether recovery is complete. A funding recovery may still need `session:retry`; the built-in adapter cannot automatically confirm an external forced withdrawal in server accounting.
+
+#### Recover funds without a cooperative merchant
+
+- **`session:request-close` — Start the waiting period for the payer to recover unsettled funds.** The payer submits this transaction directly to escrow and pays its TRX/resource costs; no merchant authorization or running session server is required. It starts the contract's grace period and does not refund tokens yet. Read the close-request timestamp and grace period with `session:inspect` before attempting withdrawal.
+
+- **`session:withdraw` — Recover the channel's unsettled remainder after the forced-close waiting period.** It requires a confirmed close request and an elapsed grace period. The payer submits the withdrawal transaction and pays its TRX/resource costs; escrow refunds the unsettled tokens to the original payer and finalizes the channel. It does not require the session server. The app simulates the call before broadcasting, so a withdrawal attempted too early is rejected without sending a transaction.
 
 ### Session recovery
 

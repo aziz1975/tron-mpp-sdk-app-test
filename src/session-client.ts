@@ -2,6 +2,7 @@ import { join } from 'node:path'
 import { loadSessionClientConfig } from './session-config.js'
 import { SessionTestClient, type SessionAction } from './session-payment-client.js'
 import { acquireLock } from './session-storage.js'
+import { jsonForDisplay } from './display.js'
 
 async function main() {
   const action = process.argv[2] ?? 'inspect', amount = process.argv[3]
@@ -20,7 +21,7 @@ async function main() {
     else if (action === 'retry') result = await client.retry()
     else if (action === 'replay') result = await client.replay()
     else result = await client.execute(action as SessionAction, amount)
-    console.log(JSON.stringify(result, null, 2))
+    console.log(jsonForDisplay(result))
     if (result && typeof result === 'object' && 'status' in result && Number(result.status) >= 400) process.exitCode = 1
     if (client.pending) console.log('Operation retained in the client journal. Retry/reconcile this operation before creating another payment.')
   } finally { release() }

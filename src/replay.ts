@@ -1,6 +1,7 @@
 import { Challenge, Receipt } from 'mppx'
 
 import { createPaymentClientMethod } from './payment-client.js'
+import { responseTextForDisplay } from './display.js'
 
 const { config, method } = createPaymentClientMethod()
 const endpoint = `${config.serverUrl}/premium`
@@ -16,7 +17,7 @@ const headers = { authorization }
 
 const acceptedResponse = await fetch(endpoint, { headers })
 console.log(`First submission: ${acceptedResponse.status}`)
-console.log('First response:', await acceptedResponse.text())
+console.log('First response:', responseTextForDisplay(await acceptedResponse.text()))
 
 if (acceptedResponse.status !== 200) {
   throw new Error('The first credential submission was not accepted.')
@@ -25,7 +26,7 @@ console.log(`Confirmed TRC-20 transaction: ${Receipt.fromResponse(acceptedRespon
 
 const replayResponse = await fetch(endpoint, { headers })
 console.log(`Replay submission: ${replayResponse.status}`)
-console.log('Replay response:', await replayResponse.text())
+console.log('Replay response:', responseTextForDisplay(await replayResponse.text()))
 
 if (replayResponse.status !== 402) {
   throw new Error(`Expected replay rejection with HTTP 402, received ${replayResponse.status}.`)
