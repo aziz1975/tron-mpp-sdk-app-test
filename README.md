@@ -17,7 +17,11 @@ The app is a test harness. Its charge journal is in memory, and its session file
 
 ## Setup for both flows
 
-1. Use Node.js 22.22 or later. Make sure the SDK is available at `../tron-mpp-sdk`, then build it and install this app's dependencies:
+1. Use Node.js 22.22 or later. Make sure the SDK is available at `../tron-mpp-sdk`.
+
+   Before the first build, ensure the **SDK's** `../tron-mpp-sdk/.env` exists. If it is missing, copy the SDK's `.env.example` to that path; preserve any existing file. Set `TRON_SESSION_ESCROW_ADDRESS` there to the deployed Nile escrow address. You can reuse an existing compatible deployment; see [Prepare a session](#prepare-a-session) for deployment requirements. This configuration is required to build the local SDK even when testing only charge.
+
+   Then build the SDK and install this app's dependencies:
 
    ```sh
    cd ../tron-mpp-sdk
@@ -26,9 +30,9 @@ The app is a test harness. Its charge journal is in memory, and its session file
    npm install
    ```
 
-   Rebuild the SDK after changing it so this app uses its updated build.
+   Rebuild the SDK after changing its code or escrow address, then restart running app processes so they use the updated build.
 
-2. If you do not already have a `.env` file, create one from the example:
+2. Back in the **app directory**, if you do not already have an app `.env` file, create one from the app's example:
 
    ```sh
    cp .env.example .env
@@ -160,7 +164,9 @@ A stream can stop and request a higher voucher when its authorized credit runs o
 ### Prepare a session
 
 1. Deploy `TronPaymentChannel` separately from `../tron-mpp-sdk-contract`, using TRON-compiled bytecode, the configured Permit2 address, an allowlist containing the token, and a close grace period of at least 900 seconds. This app does not deploy it.
-2. Set `TRON_SESSION_ESCROW_ADDRESS` to the deployed contract. Set `TRON_RELAYER_PRIVATE_KEY` and fund that relayer with Nile TRX/resources. Set `TRON_PAYEE_PRIVATE_KEY` to the key for `TRON_RECIPIENT_ADDRESS`, unless the relayer is already that merchant. The merchant signs settlement and close authorizations; the relayer submits them.
+2. Set `TRON_SESSION_ESCROW_ADDRESS` to the deployed contract in `../tron-mpp-sdk/.env` (copy the SDK’s `.env.example` if needed). Set `TRON_RELAYER_PRIVATE_KEY` and fund that relayer with Nile TRX/resources. Set `TRON_PAYEE_PRIVATE_KEY` to the key for `TRON_RECIPIENT_ADDRESS`, unless the relayer is already that merchant. The merchant signs settlement and close authorizations; the relayer submits them.
+   The SDK reads this file during `npm run build` and embeds the validated address. Rebuild the SDK and restart the app after changing the address. The app does not configure or pass an escrow address; `session:inspect` displays it for diagnostics.
+
 3. Check the `SESSION_*` settings in `.env.example`. `SESSION_MAX_DEPOSIT_ATOMIC` and `SESSION_MAX_CUMULATIVE_ATOMIC` are separate client limits. The payer needs enough tokens for the deposit and TRX/resources for approval or forced withdrawal.
 4. For sessions, the escrow is the Permit2 spender; the payer still grants the token allowance to Permit2. `TRON_PERMIT2_SPENDER_ADDRESS` is only for charge. Both flows share the token's Permit2 allowance, so check that no charge is pending before changing it.
 

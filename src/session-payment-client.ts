@@ -1,10 +1,11 @@
+import type { SubmissionHooks } from 'tron-mpp-sdk/session'
 import { join } from 'node:path'
 import { Challenge, Credential, Receipt, z } from 'mppx'
-import { Bytes32Schema, Session, Uint128Schema, computeChannelId, normalizeAddress, zeroAddress, TransactionNotSubmittedError, TransactionRevertedError } from 'tron-mpp-sdk'
-import { tron, authorizeSessionRequest } from 'tron-mpp-sdk/client'
-import { createSessionWallet, escrowAbi, waitForReceipt, type TronTransport } from 'tron-mpp-sdk/tronweb'
+import { Bytes32Schema, Session, Uint128Schema, normalizeAddress, zeroAddress, TransactionNotSubmittedError, TransactionRevertedError } from 'tron-mpp-sdk'
+import { authorizeSessionRequest } from 'tron-mpp-sdk/client'
+import { waitForReceipt, type TronTransport } from 'tron-mpp-sdk/tronweb'
 import { encodeFunctionData, type Hex } from 'viem'
-import { confirmations, inspectEscrow, nodeTransport, randomHex, sessionViews } from './session-chain.js'
+import { confirmations, configuredSession, nodeTransport, randomHex, sessionViews } from './session-chain.js'
 import { readJson, writeJson } from './session-storage.js'
 import type { SessionClientConfig } from './session-config.js'
 
@@ -18,13 +19,14 @@ export type SessionAction = 'open' | 'voucher' | 'topUp' | 'merge' | 'pay' | 'st
 
 export class SessionTestClient {
   readonly transport: TronTransport
-  readonly wallet: ReturnType<typeof createSessionWallet>
+  readonly session: ReturnType<typeof configuredSession>
+  readonly wallet: ReturnType<typeof configuredSession>['wallet']
   private saved: SavedState
   private readonly path: string
   constructor(readonly config: SessionClientConfig, transport = nodeTransport(config, config.payerPrivateKey)) {
-    this.transport = transport; this.wallet = createSessionWallet(transport, config.escrowAddress, confirmations(config))
+    this.transport = transport; this.session = configuredSession(config, transport); this.wallet = this.session.wallet
     this.path = join(config.stateDir, 'client.json')
-    const binding = JSON.stringify([config.chainId, config.serverUrl, config.tokenAddress, config.recipientAddress, config.escrowAddress, config.permit2Address, config.payer])
+    const binding = this.session.stateBinding({ serverUrl: config.serverUrl, recipient: config.recipientAddress, payer: config.payer })
     const existing = readJson(this.path)
     this.saved = existing === null ? { version: 1, binding } : Saved.parse(existing)
     if (this.saved.binding !== binding) throw new Error('Saved session belongs to different wallets, contracts, or server. Use a separate SESSION_STATE_DIR.')
@@ -43,9 +45,9 @@ export class SessionTestClient {
   }
   private validate(challenge: Challenge.Challenge) {
     const request = Session.RequestSchema.parse(challenge.request), c = this.config
+    this.session.assertRequest(request)
     if (challenge.method !== 'tron' || challenge.intent !== 'session' || request.methodDetails.chainId !== c.chainId ||
       normalizeAddress(request.currency) !== c.tokenAddress || normalizeAddress(request.recipient) !== c.recipientAddress ||
-      normalizeAddress(request.methodDetails.escrowContract) !== c.escrowAddress ||
       normalizeAddress(request.methodDetails.permit2Contract ?? '') !== c.permit2Address || request.methodDetails.feePayer !== true ||
       JSON.stringify(request.methodDetails.credentialTypes) !== JSON.stringify([c.credentialType]) || request.amount !== c.unitAmount) throw new Error('Session challenge does not match local policy. Restart the matching server/configuration.')
     if (!challenge.expires || !Number.isFinite(Date.parse(challenge.expires)) || Date.parse(challenge.expires) <= Date.now()) throw new Error('Session challenge expired.')
@@ -78,9 +80,9 @@ export class SessionTestClient {
     const c = this.config
     const httpMethod = action === 'voucher' || action === 'merge' ? 'HEAD' : action === 'pay' || action === 'stream' ? 'GET' : 'POST'
     const challenge = await this.challenge(httpMethod)
-    await inspectEscrow(c, this.transport)
-    const method = tron.session({ chainIds: [c.chainId], currencies: [c.tokenAddress], escrowContracts: [c.escrowAddress], recipients: [c.recipientAddress], payer: c.payer,
-      maxUnitAmount: c.unitAmount, maxCumulativeAmount: c.maxCumulative, wallet: this.wallet,
+    await this.session.inspect()
+    const method = this.session.client({ recipients: [c.recipientAddress], payer: c.payer,
+      maxUnitAmount: c.unitAmount, maxCumulativeAmount: c.maxCumulative,
       preparePayment: async () => {
         if (action === 'open') {
           if (this.saved.channelId) {
@@ -89,7 +91,7 @@ export class SessionTestClient {
             if (!previous && this.saved.receipt) throw new Error('A previously confirmed channel cannot be found. Investigate before another deposit.')
           }
           const salt = randomHex(), funding = await this.funding(c.deposit, undefined, salt)
-          const id = computeChannelId({ payer: c.payer, payee: c.recipientAddress, token: c.tokenAddress, salt, escrowContract: c.escrowAddress, chainId: c.chainId })
+          const id = this.session.computeChannelId({ payer: c.payer, payee: c.recipientAddress, salt })
           return Session.PaymentPlanSchema.parse({ ...funding, channelId: id, cumulativeAmount: '0' })
         }
         const id = this.id(), channel = await this.wallet.adapter.channel(id)
@@ -194,46 +196,45 @@ export class SessionTestClient {
     return { status: response.status, body: text }
   }
   async inspect() {
-    const checked = await inspectEscrow(this.config, this.transport)
+    const checked = await this.session.inspect()
     const [balance, allowance, channel] = await Promise.all([
       this.transport.call(this.config.tokenAddress, encodeFunctionData({ abi: sessionViews, functionName: 'balanceOf', args: [this.config.payer] })),
       this.transport.call(this.config.tokenAddress, encodeFunctionData({ abi: sessionViews, functionName: 'allowance', args: [this.config.payer, this.config.permit2Address] })),
       this.saved.channelId ? this.wallet.adapter.channel(this.saved.channelId) : null,
     ])
-    return { payer: this.config.payer, escrow: this.config.escrowAddress, permit2: this.config.permit2Address, gracePeriod: checked.gracePeriod,
+    return { payer: this.config.payer, ...checked,
       balance: BigInt(balance).toString(), allowance: BigInt(allowance).toString(), channelId: this.saved.channelId, channel,
       pending: this.saved.pending ? { method: this.saved.pending.method, action: Session.PayloadSchema.parse(Credential.deserialize(this.saved.pending.authorization).payload).action } : this.saved.chainOperation,
       receipt: this.saved.receipt ? Receipt.deserialize(this.saved.receipt) : undefined }
   }
   async approve(revoke = false) {
     if (this.pending) throw new Error('Resolve the saved operation before changing its allowance.')
-    await inspectEscrow(this.config, this.transport)
+    await this.session.inspect()
     const current = BigInt(await this.transport.call(this.config.tokenAddress, encodeFunctionData({ abi: sessionViews, functionName: 'allowance', args: [this.config.payer, this.config.permit2Address] })))
     const target = revoke ? 0n : BigInt(this.config.maxDeposit)
     if (current === target) return { unchanged: true, allowance: current.toString() }
     if (current !== 0n && target !== 0n) throw new Error('Existing allowance differs. Run session:revoke before session:approve.')
     // Persist an ambiguous approval too; retry confirms this hash without sending again.
-    return this.chainTransaction('approve', encodeFunctionData({ abi: sessionViews, functionName: 'approve', args: [this.config.permit2Address, target] }), this.config.tokenAddress)
+    return this.chainTransaction('approve', hooks => this.session.approve(target.toString(), hooks))
   }
-  private async chainTransaction(action: 'approve' | 'requestClose' | 'withdraw', data: Hex, to = this.config.escrowAddress) {
+  private async chainTransaction(action: 'approve' | 'requestClose' | 'withdraw', submit: (hooks: SubmissionHooks) => Promise<Hex>) {
     if (this.saved.chainOperation) throw new Error('A payer transaction is unresolved; use session:retry.')
-    await this.transport.call(to, data)
-    this.saved.chainOperation = { action }
-    this.save()
     try {
-      const hash = await this.transport.send(to, data)
-      this.saved.chainOperation.hash = hash; this.save()
-      await waitForReceipt(this.transport, hash, confirmations(this.config))
+      const hash = await submit({
+        beforeSubmit: () => { this.saved.chainOperation = { action }; this.save() },
+        onSubmitted: hash => { this.saved.chainOperation!.hash = hash; this.save() },
+      })
       delete this.saved.chainOperation; this.save()
       return { status: 200, action, hash }
     } catch (error) {
       const failure = error as { hash?: Hex; code?: string }
-      if (failure.hash && this.saved.chainOperation) { this.saved.chainOperation.hash = failure.hash; this.save() }
+      const operation = this.saved.chainOperation as SavedState['chainOperation']
+      if (failure.hash && operation) { operation.hash = failure.hash; this.save() }
       if (error instanceof TransactionNotSubmittedError || error instanceof TransactionRevertedError || failure.code === 'transaction-reverted') { delete this.saved.chainOperation; this.save() }
       throw error
     }
   }
   async force(action: 'requestClose' | 'withdraw') {
-    return this.chainTransaction(action, encodeFunctionData({ abi: escrowAbi, functionName: action, args: [this.id()] }))
+    return this.chainTransaction(action, hooks => this.session.force(action, this.id(), hooks))
   }
 }

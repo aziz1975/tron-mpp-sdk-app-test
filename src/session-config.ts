@@ -38,7 +38,7 @@ export function loadSessionConfig() {
     fullHost: process.env.TRON_FULL_HOST?.trim() || 'https://nile.trongrid.io',
     tronProApiKey: process.env.TRON_PRO_API_KEY?.trim() || undefined,
     tokenAddress: address('TRON_TOKEN_ADDRESS'), recipientAddress: address('TRON_RECIPIENT_ADDRESS'),
-    escrowAddress: address('TRON_SESSION_ESCROW_ADDRESS'), permit2Address: address('TRON_PERMIT2_ADDRESS'),
+    permit2Address: address('TRON_PERMIT2_ADDRESS'),
     stateDir: resolve(process.env.SESSION_STATE_DIR?.trim() || '.data/session'),
     unitAmount, deposit, topUp, maxDeposit, maxCumulative,
     streamUnits: integer('SESSION_STREAM_UNITS', 4, 100),

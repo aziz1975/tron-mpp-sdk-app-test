@@ -5,7 +5,7 @@ import { Credential, Receipt, type Store } from 'mppx'
 import { Bytes32Schema, Session } from 'tron-mpp-sdk'
 import { Mppx, tron, needVoucherEvent, receiptEvent, type SessionState } from 'tron-mpp-sdk/server'
 import { acquireLock, fileStore } from './session-storage.js'
-import { inspectEscrow, nodeTransport, serverAdapter } from './session-chain.js'
+import { configuredSession, nodeTransport, serverAdapter } from './session-chain.js'
 import type { SessionServerConfig } from './session-config.js'
 
 export function publicState(state: SessionState | null) {
@@ -31,7 +31,7 @@ async function body(request: IncomingMessage): Promise<Record<string, unknown>> 
   return parsed as Record<string, unknown>
 }
 export async function createSessionApp(config: SessionServerConfig, dependencies: { adapter?: Session.Adapter; store?: Store.AtomicStore } = {}) {
-  if (!dependencies.adapter) await inspectEscrow(config, nodeTransport(config, config.relayerPrivateKey))
+  if (!dependencies.adapter) await configuredSession(config, nodeTransport(config, config.relayerPrivateKey)).inspect()
   const release = dependencies.store ? () => {} : acquireLock(join(config.stateDir, 'server.lock'))
   try {
     const method = tron.session({ adapter: dependencies.adapter ?? serverAdapter(config), currency: config.tokenAddress,
@@ -44,7 +44,7 @@ export async function createSessionApp(config: SessionServerConfig, dependencies
         const url = new URL(request.url ?? '/', 'http://localhost')
         if (request.method === 'GET' && url.pathname === '/health') {
           json(response, 200, { status: 'ok', intent: 'session', credentialTypes: [config.credentialType], chainId: config.chainId,
-            currency: config.tokenAddress, recipient: config.recipientAddress, escrowContract: config.escrowAddress,
+            currency: config.tokenAddress, recipient: config.recipientAddress,
             permit2Contract: config.permit2Address, unitAmount: config.unitAmount }); return
         }
         if (request.method === 'GET' && url.pathname === '/session/state') {

@@ -1,10 +1,11 @@
+import { getSessionEscrowAddress } from 'tron-mpp-sdk/config'
 import assert from 'node:assert/strict'
 import { once } from 'node:events'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { TronWeb } from 'tronweb'
-import { decodeFunctionData, encodeAbiParameters, encodeFunctionData, keccak256, toBytes, type Address, type Hex } from 'viem'
+import { parseAbi, decodeFunctionData, encodeAbiParameters, encodeFunctionData, keccak256, toBytes, type Address, type Hex } from 'viem'
 import { Session, computeChannelId, recoverSigner, payeeAuthorizationTypedData, voucherTypedData, zeroAddress } from 'tron-mpp-sdk'
 import { createTronWebTransport, escrowAbi, type TronTransport, type TransactionReceipt } from 'tron-mpp-sdk/tronweb'
 import { createSessionApp } from '../src/session-app.js'
@@ -14,8 +15,12 @@ import { SessionTestClient } from '../src/session-payment-client.js'
 import type { SessionServerConfig, SessionClientConfig } from '../src/session-config.js'
 import { key, payer, recipient, token, chainId } from './helpers.js'
 
-export const escrow = `0x${'66'.repeat(20)}` as Address
+export const escrow = getSessionEscrowAddress()
 export const permit2 = `0x${'55'.repeat(20)}` as Address
+const escrowViews = parseAbi([
+  'function PERMIT2() view returns (address)', 'function allowedTokens(address) view returns (bool)',
+  'function domainSeparator() view returns (bytes32)', 'function DOMAIN_SEPARATOR() view returns (bytes32)',
+])
 const relayerKey = '2'.repeat(64), payeeKey = '3'.repeat(64)
 const topic = (signature: string) => keccak256(toBytes(signature)).slice(2)
 const word = (value: string) => value.slice(2).toLowerCase().padStart(64, '0')
@@ -24,7 +29,7 @@ const uint = (value: bigint) => encodeAbiParameters([{ type: 'uint256' }], [valu
 export async function sessionFixture() {
   const stateDir = mkdtempSync(join(tmpdir(), 'session-app-test-'))
   const common = { credentialType: 'permit2' as const, chainId, port: 0, serverUrl: '', fullHost: 'http://127.0.0.1:1', tronProApiKey: undefined,
-    tokenAddress: token, recipientAddress: recipient, escrowAddress: escrow, permit2Address: permit2, stateDir,
+    tokenAddress: token, recipientAddress: recipient, permit2Address: permit2, stateDir,
     unitAmount: '10', deposit: '100', topUp: '100', maxDeposit: '200', maxCumulative: '200', streamUnits: 4,
     transactionTimeoutMs: 15, pollIntervalMs: 1, minConfirmations: 1 }
   const serverConfig: SessionServerConfig = { ...common, relayerPrivateKey: relayerKey, payeePrivateKey: payeeKey, mppSecretKey: 'session-integration-secret-0123456789' }
@@ -45,7 +50,7 @@ export async function sessionFixture() {
     const sign = signing(ownerKey)
     return { chainId, payer: owner, signTypedData: async data => { counters.signatures++; return sign(data) },
       async call(to, data) {
-        const decoded = decodeFunctionData({ abi: [...escrowAbi, ...sessionViews], data })
+        const decoded = decodeFunctionData({ abi: [...escrowAbi, ...sessionViews, ...escrowViews], data })
         const args = decoded.args as readonly unknown[] | undefined
         switch (decoded.functionName) {
           case 'PERMIT2': return encodeAbiParameters([{ type: 'address' }], [permit2])
@@ -70,7 +75,7 @@ export async function sessionFixture() {
         }
       },
       async send(to, data) {
-        const { functionName, args: typed } = decodeFunctionData({ abi: [...escrowAbi, ...sessionViews], data })
+        const { functionName, args: typed } = decodeFunctionData({ abi: [...escrowAbi, ...sessionViews, ...escrowViews], data })
         const args = typed as readonly unknown[]
         const hash = `0x${(++sequence).toString(16).padStart(64, '0')}` as Hex
         let logs: NonNullable<TransactionReceipt['log']> = []

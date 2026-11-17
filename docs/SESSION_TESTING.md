@@ -6,7 +6,18 @@ continue to use `/premium` on port 3000; sessions use `/session` on port 3001.
 
 ## Configure the existing .env
 
-Build the local SDK before starting the app:
+First, choose a compatible Nile escrow deployment. Reuse an existing deployment,
+or deploy `TronPaymentChannel` from `../tron-mpp-sdk-contract` separately using
+TRON-compiled bytecode, an allowlist containing the configured token, the same
+Permit2 address, and a close grace period of at least 900 seconds. This app does
+not deploy contracts automatically.
+
+Before building, ensure the **SDK's** `../tron-mpp-sdk/.env` exists. If it is
+missing, copy the SDK's `.env.example` to that path; preserve any existing file.
+Set `TRON_SESSION_ESCROW_ADDRESS` in the SDK's file to the deployed Nile escrow
+address. The build fails if this setting is missing or invalid.
+
+Then build the local SDK before starting the app:
 
 ```sh
 cd ../tron-mpp-sdk
@@ -14,13 +25,15 @@ npm run build
 cd ../tron-mpp-sdk-app-test
 ```
 
-Keep the existing `TRON_FULL_HOST`, `TRON_TOKEN_ADDRESS`, `TRON_PERMIT2_ADDRESS`,
+The SDK reads the escrow from its own `.env` during `npm run build` and embeds the validated address in its compiled code. Rebuild the SDK and restart the app after changing that address. Installed packages and bundled applications do not read `.env` for escrow configuration at runtime. The app does not load or pass the address. SDK operations validate challenges, signing domains, and transaction targets against the embedded deployment.
+
+In the **app's** `.env`, keep the existing `TRON_FULL_HOST`, `TRON_TOKEN_ADDRESS`, `TRON_PERMIT2_ADDRESS`,
 `TRON_RECIPIENT_ADDRESS`, `TRON_PAYER_PRIVATE_KEY`, `TRON_RELAYER_PRIVATE_KEY`, and
 `MPP_SECRET_KEY`. Add the session settings from `.env.example` without replacing
 the existing file or secrets:
 
 ```dotenv
-TRON_SESSION_ESCROW_ADDRESS=<deployed TronPaymentChannel address on Nile>
+# Set TRON_SESSION_ESCROW_ADDRESS in ../tron-mpp-sdk/.env instead.
 TRON_PAYEE_PRIVATE_KEY=<private key for TRON_RECIPIENT_ADDRESS>
 SESSION_PORT=3001
 SESSION_STATE_DIR=.data/session
@@ -32,10 +45,7 @@ SESSION_MAX_CUMULATIVE_ATOMIC=2000000
 SESSION_STREAM_UNITS=4
 ```
 
-Deploy `TronPaymentChannel` from `../tron-mpp-sdk-contract` separately, using
-TRON-compiled bytecode, an allowlist containing the configured token, the same
-Permit2 address, and a close grace period of at least 900 seconds. This app does
-not deploy contracts automatically. `session:inspect` and server startup verify
+`session:inspect` and server startup verify
 `PERMIT2()`, the token allowlist, grace period, and both signing domains against
 the local Nile configuration.
 

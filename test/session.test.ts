@@ -1,3 +1,4 @@
+import { Challenge } from 'mppx'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs'
@@ -6,7 +7,7 @@ import { tmpdir } from 'node:os'
 import { SessionTestClient } from '../src/session-payment-client.js'
 import { acquireLock, fileStore, readJson } from '../src/session-storage.js'
 import { loadSessionClientConfig, loadSessionServerConfig } from '../src/session-config.js'
-import { sessionFixture, escrow, permit2 } from './session-helpers.js'
+import { sessionFixture, permit2 } from './session-helpers.js'
 import { key, token, recipient } from './helpers.js'
 import { TransactionNotSubmittedError } from 'tron-mpp-sdk'
 
@@ -103,10 +104,21 @@ test('session replay protection and billing remain durable after restarting both
 
 test('client checks session recipient, escrow, Permit2 and price before signing', async t => {
   const f = await sessionFixture(); t.after(f.close)
-  for (const change of [{ recipientAddress: token }, { escrowAddress: token }, { permit2Address: token }, { unitAmount: '11' }]) {
+  for (const change of [{ recipientAddress: token }, { permit2Address: token }, { unitAmount: '11' }]) {
     const client = new SessionTestClient({ ...f.config, ...change }, f.transport)
     await assert.rejects(client.execute('open'), /local policy/)
   }
+  const fetchOriginal = globalThis.fetch
+  try {
+    globalThis.fetch = async (...args) => {
+      const response = await fetchOriginal(...args)
+      const challenge = Challenge.fromResponse(response)
+      const request = challenge.request as { methodDetails: Record<string, unknown> }
+      request.methodDetails.escrowContract = token
+      return new Response(null, { status: 402, headers: { 'www-authenticate': Challenge.serialize(challenge) } })
+    }
+    await assert.rejects(f.client.execute('open'), /SDK escrow.network policy/)
+  } finally { globalThis.fetch = fetchOriginal }
   assert.equal(f.counters.signatures, 0)
   assert.equal(f.counters.funding, 0)
 })
@@ -195,14 +207,14 @@ test('session configuration validates credential mode and merchant signing', () 
   const previous = process.env
   try {
     process.env = { TRON_TOKEN_ADDRESS: token, TRON_RECIPIENT_ADDRESS: recipient, TRON_PERMIT2_ADDRESS: permit2,
-      TRON_SESSION_ESCROW_ADDRESS: escrow, TRON_PAYER_PRIVATE_KEY: key, TRON_RELAYER_PRIVATE_KEY: '2'.repeat(64), MPP_SECRET_KEY: 'session-config-test-secret', CREDENTIAL_TYPE: 'permit2' }
+      TRON_PAYER_PRIVATE_KEY: key, TRON_RELAYER_PRIVATE_KEY: '2'.repeat(64), MPP_SECRET_KEY: 'session-config-test-secret', CREDENTIAL_TYPE: 'permit2' }
     assert.equal(loadSessionClientConfig().credentialType, 'permit2')
     process.env.CREDENTIAL_TYPE = 'transaction'
     assert.throws(loadSessionClientConfig, /CREDENTIAL_TYPE must be permit2/)
     process.env.CREDENTIAL_TYPE = 'authorization'
     assert.throws(loadSessionServerConfig, /CREDENTIAL_TYPE must be permit2/)
     process.env.CREDENTIAL_TYPE = 'permit2'
-    assert.equal(loadSessionClientConfig().escrowAddress, escrow)
+    assert.equal('escrowAddress' in loadSessionClientConfig(), false)
     assert.throws(loadSessionServerConfig, /TRON_PAYEE_PRIVATE_KEY/)
     process.env.TRON_PAYEE_PRIVATE_KEY = '3'.repeat(64)
     assert.equal(loadSessionServerConfig().payeePrivateKey, '3'.repeat(64))
@@ -211,7 +223,5 @@ test('session configuration validates credential mode and merchant signing', () 
     process.env.SESSION_MAX_CUMULATIVE_ATOMIC = '0'
     assert.throws(loadSessionServerConfig, /positive/)
     delete process.env.SESSION_MAX_CUMULATIVE_ATOMIC
-    delete process.env.TRON_SESSION_ESCROW_ADDRESS
-    assert.throws(loadSessionServerConfig, /TRON_SESSION_ESCROW_ADDRESS/)
   } finally { process.env = previous }
 })
