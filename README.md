@@ -224,6 +224,35 @@ For a token that decrements finite allowances on `transferFrom`, the walkthrough
 
 Voucher updates, paid messages, and streaming do not consume Permit2 funding nonces or transfer tokens. Settlement, cooperative close, and forced withdrawal transfer tokens already held by escrow without pulling more from the payer through Permit2. Commands may still read Permit2 during deployment checks; those reads change no state.
 
+### Session local files and how to view them
+
+Session commands load the app's `.env`. `SESSION_STATE_DIR` selects the journal directory; the default `.data/session` is relative to the directory where you run the app. In this repository, that is `/home/aziz/localrepos/blockchain-projects/tron-mpp-sdk-app-test/.data/session`. Both the server and client must retain their own journals between commands and restarts.
+
+| File | Used by | Contents and write timing |
+| --- | --- | --- |
+| `.data/session/server.json` | Session server and SDK session manager | Channel totals (`deposit`, `acceptedCumulative`, `spent`, `settledOnChain`), accepted voucher signatures, request/replay records, funding records, and pending settlement/close operations. Loaded at server startup; updates are persisted as requests are processed. A message debit is saved before sending its content. |
+| `.data/session/client.json` | All session client CLI commands | Saved channel ID and configuration binding, pending signed request or payer transaction, last successful request, and latest saved receipt. Loaded when each command starts; commands that change client state save it as described below. This is not a complete message or receipt history. |
+| `.data/session/server.lock` | `session:server` | Process ID of the server holding the journal lock; created at startup and removed on normal shutdown. |
+| `.data/session/client.lock` | Every session client CLI command, including `session:inspect` and `session:challenge` | Process ID of the command holding the client lock; created for the command and removed when it finishes normally. |
+
+The server keeps its loaded state in memory and writes updates through the file store; CLI commands contact the server over HTTP rather than opening `server.json` themselves. `session:inspect` reads the blockchain and `client.json`, including its last saved receipt; it does not fetch the server's current `spent` or settlement accounting. For example, an operator settlement does not refresh that saved client receipt.
+
+From the app directory, use `jq` to display the server journal:
+
+```sh
+jq . .data/session/server.json
+```
+
+Displays the current persisted server records without modifying files or making a payment. The filename is **`server.json`**, not `server.js`. The journal may not exist until the server first persists a session update. If you changed `SESSION_STATE_DIR`, replace `.data/session` in these commands with that directory. In a file manager, enable hidden files (usually Ctrl+H) to see `.data`.
+
+To display only channel accounting and omit signatures and funding records:
+
+```sh
+jq 'to_entries[] | select(.value | type == "object") | select(.value.spent != null) | {key: .key, deposit: .value.deposit, acceptedCumulative: .value.acceptedCumulative, spent: .value.spent, settledOnChain: .value.settledOnChain, closed: .value.closed}' .data/session/server.json
+```
+
+Values are atomic units: after the first `session:pay`, `spent: "100000"` means 0.1 USDT. Request records identify billed units and prevent duplicate charges; they do not store the delivered message text. Viewing the journal does not change any wallet balance. Preserve the journals for recovery, and let the app write updates rather than editing a running server's file.
+
 ### Test a session
 
 Run each command separately and check its result before continuing. A service charge updates `spent`; an on-chain transfer changes token balances. Vouchers and messages send no blockchain transaction and cost no TRX/resources.
@@ -250,6 +279,8 @@ In terminal 1:
 npm run session:server
 ```
 
+**Local files:** Loads `server.json` at startup, holds `server.lock`, and persists session updates to `server.json` while handling requests.
+
 Checks the escrow's Permit2, token allowlist, grace period, and signing domains, then starts the merchant's service. No transaction is broadcast and no USDT moves. Leave this terminal running. If the charge server occupies port 3001, stop it or configure a different session port.
 
 In terminal 2, from the app directory:
@@ -264,11 +295,15 @@ Checks the server's health and session configuration. No funds move. Adjust the 
 npm run session:inspect
 ```
 
+**Local files:** Reads the channel ID, pending operation, and latest saved receipt from `client.json`. Changes neither journal and does not read the live server accounting in `server.json`.
+
 Reads the payer's balance, Permit2 allowance, escrow details, saved channel, and pending operations without signing or broadcasting. Confirm the intended escrow and a grace period of at least 900 seconds.
 
 ```sh
 npm run session:challenge
 ```
+
+**Local files:** Loads `client.json` at startup. This unpaid check changes neither journal's session accounting.
 
 Checks the payment terms without signing or paying. Expect HTTP 402, `permit2`, and `100000` atomic units per message (0.1 USDT). No funds move.
 
@@ -278,21 +313,27 @@ Checks the payment terms without signing or paying. Expect HTTP 402, `permit2`, 
 npm run session:approve
 ```
 
+**Local files:** Reads `client.json`; if submitting an approval, saves the pending transaction and hash there, then clears the pending record after confirmation. Does not update `server.json`.
+
 The `TRON_PAYER_PRIVATE_KEY` wallet grants `TRON_PERMIT2_ADDRESS` a **2-USDT allowance**. No USDT moves to Permit2, escrow, or the merchant. The payer submits the approval transaction and pays its TRX/resource costs; if the allowance already equals the target, no transaction is sent.
 
 **Permit2 impact:** this approval is recorded in the USDT contract at `TRON_TOKEN_ADDRESS`, with Permit2 as the approved spender of the payer's tokens. Permit2's own nonce state and USDT balance do not change.
 
-If a different nonzero allowance exists, resolve pending charge/session operations, run `npm run session:revoke`, then approve again. Revocation sets the allowance to zero, transfers no USDT, and costs the payer TRX/resources if a transaction is needed.
+If a different nonzero allowance exists, resolve pending charge/session operations, run `npm run session:revoke`, then approve again. Revocation sets the allowance to zero, transfers no USDT, and costs the payer TRX/resources if a transaction is needed. It journals the payer transaction in `client.json`; it does not update `server.json`.
 
 ```sh
 npm run session:inspect
 ```
+
+**Local files:** Reads the channel ID, pending operation, and latest saved receipt from `client.json`. Changes neither journal and does not read the live server accounting in `server.json`.
 
 Reads the allowance without moving funds. Expect `allowance: "2000000"`.
 
 ```sh
 npm run session:open
 ```
+
+**Local files:** Saves the channel ID and pending signed request in `client.json` before submission. The server journals funding and channel state in `server.json`; the client saves the successful receipt in `client.json`.
 
 The payer signs the opening and funding authorizations. The relayer submits the transaction; Permit2 transfers **1 USDT from the `TRON_PAYER_PRIVATE_KEY` wallet to `TRON_SESSION_ESCROW_ADDRESS`**. Verify the token transfer and `ChannelOpened` event.
 
@@ -310,6 +351,8 @@ The payer signs the opening and funding authorizations. The relayer submits the 
 npm run session:inspect
 ```
 
+**Local files:** Reads the channel ID, pending operation, and latest saved receipt from `client.json`. Changes neither journal and does not read the live server accounting in `server.json`.
+
 Reads the result without moving funds. Expect:
 
 ```text
@@ -326,11 +369,15 @@ Opening alone buys no message and authorizes no service credit.
 npm run session:voucher
 ```
 
+**Local files:** Saves the pending signed request and resulting receipt in `client.json`. The server saves the accepted cumulative amount and voucher signature in `server.json`; `spent` does not increase.
+
 The `TRON_PAYER_PRIVATE_KEY` wallet signs a voucher authorizing **0.4 USDT cumulatively**. No USDT moves; the merchant has an authorization it can later settle.
 
 ```sh
 npm run session:pay
 ```
+
+**Local files:** Saves the pending request in `client.json`. The server persists the debit to `spent` and request records in `server.json` before sending content; the client then saves the updated receipt in `client.json`.
 
 Delivers one message and records a **0.1-USDT service charge**. No USDT moves on-chain: the opening deposit remains in escrow and `TRON_RECIPIENT_ADDRESS` has received nothing yet. Expect:
 
@@ -345,6 +392,8 @@ Immediately test the same paid request again:
 npm run session:replay
 ```
 
+**Local files:** Reads the last successful signed request from `client.json` without rewriting that journal. The server checks saved replay records in its loaded `server.json` state; this paid-request replay adds no debit.
+
 Expect **HTTP 409** and a nonzero command exit status. No additional message, service charge, or token transfer occurs.
 
 #### 4. Consume the remaining authorized credit
@@ -352,6 +401,8 @@ Expect **HTTP 409** and a nonzero command exit status. No additional message, se
 ```sh
 npm run session:stream
 ```
+
+**Local files:** Saves the pending request in `client.json`. Each message debit is persisted in `server.json` before that message is sent; the client saves the final receipt in `client.json`.
 
 Attempts up to four messages, but only three fit in the remaining authorization. Expect three content events (another **0.3 USDT** of service charges), then `payment-need-voucher` with `requiredCumulative: "500000"`, and a final receipt with `spent: "400000"`.
 
@@ -362,6 +413,8 @@ No USDT moves and no transaction is submitted. Alice has received four messages;
 ```sh
 npm run session:merge
 ```
+
+**Local files:** Saves the pending request and resulting receipt in `client.json`. The server persists the funding record, increased deposit, and accepted voucher in `server.json`.
 
 Combines a **1-USDT top-up** with a voucher raising cumulative authorization to **0.8 USDT**. It does not deliver or charge for a message.
 
@@ -379,6 +432,8 @@ Combines a **1-USDT top-up** with a voucher raising cumulative authorization to 
 npm run session:inspect
 ```
 
+**Local files:** Reads the channel ID, pending operation, and latest saved receipt from `client.json`. Changes neither journal and does not read the live server accounting in `server.json`.
+
 Reads the updated state without moving funds. Expect:
 
 ```text
@@ -391,9 +446,13 @@ spent:               400000
 npm run session:stream
 ```
 
+**Local files:** Saves the pending request in `client.json`. Each message debit is persisted in `server.json` before that message is sent; the client saves the final receipt in `client.json`.
+
 Delivers four more messages, recording another **0.4 USDT** of service charges. Expect `spent: "800000"` and eight messages delivered in total. No on-chain USDT movement occurs.
 
 Do not add a standalone `session:topup` to this sequence: total funding has reached the configured 2-USDT cap. On a different channel with room below the cap, a default top-up transfers 1 USDT from the payer to escrow, with transaction costs paid by the relayer; it does not increase voucher authorization.
+
+**Local files for a standalone `session:topup`:** the client saves the pending funding request and resulting receipt in `client.json`; the server persists the funding record and increased deposit in `server.json`.
 
 For that standalone `session:topup`, escrow calls `TRON_PERMIT2_ADDRESS` with a fresh channel-bound permit. Successful funding consumes its nonce and uses the payer's remaining token allowance; Permit2's USDT balance changes by zero. The default 1-USDT top-up needs at least 1 USDT of remaining allowance and payer balance.
 
@@ -402,6 +461,8 @@ For that standalone `session:topup`, escrow calls `TRON_PERMIT2_ADDRESS` with a 
 ```sh
 npm run session:settle
 ```
+
+**Local files:** Reads the saved channel ID from `client.json`. The server persists its settlement operation and confirmed accounting in `server.json`; this operator command does not replace the saved receipt in `client.json`.
 
 The merchant signs using `TRON_PAYEE_PRIVATE_KEY`; the relayer submits that authorization with the payer's voucher. This operator command requires `MPP_SECRET_KEY`. Settlement pays the highest accepted cumulative voucher less anything already settled. Here, all 0.8 USDT of authorized credit has been consumed.
 
@@ -420,11 +481,15 @@ The channel stays open. `deposit` remains `2000000` because it records total fun
 npm run session:voucher -- 1200000
 ```
 
+**Local files:** Saves the pending signed request and resulting receipt in `client.json`. The server saves the accepted cumulative amount and voucher signature in `server.json`; `spent` does not increase.
+
 The payer authorizes **1.2 USDT cumulatively**, not an additional 1.2 USDT. No funds move. The merchant could settle this higher authorization even before all of it is consumed.
 
 ```sh
 npm run session:pay
 ```
+
+**Local files:** Saves the pending request in `client.json`. The server persists the debit to `spent` and request records in `server.json` before sending content; the client then saves the updated receipt in `client.json`.
 
 Delivers a ninth message and records another **0.1-USDT service charge**. No on-chain USDT moves. Expect:
 
@@ -439,6 +504,8 @@ Proceed directly to close without another settlement to obtain the totals below:
 npm run session:close
 ```
 
+**Local files:** Saves the pending close request and resulting receipt in `client.json`. The server persists the close operation and finalized channel accounting in `server.json`.
+
 The payer signs a close voucher for the greater of delivered spend and the amount already settled: **0.9 USDT** here. The merchant signs the close authorization, and the relayer submits it. Escrow pays the additional amount owed, refunds the remainder, and finalizes the channel.
 
 | Address impacted | Change |
@@ -451,6 +518,8 @@ The payer signs a close voucher for the greater of delivered spend and the amoun
 ```sh
 npm run session:inspect
 ```
+
+**Local files:** Reads the channel ID, pending operation, and latest saved receipt from `client.json`. Changes neither journal and does not read the live server accounting in `server.json`.
 
 Reads the finalized channel without moving funds.
 
@@ -512,19 +581,23 @@ When reading the output, keep these amounts separate:
 
 #### Start the server and check the setup
 
-- **`session:server` — Start the merchant's session service.** It checks that the SDK's escrow matches the configured token, Permit2, network, and signing domains, then listens on `SESSION_PORT`. Leave it running while using commands that contact the server. It logs each completed HTTP request, including 402 challenges and successful 200 responses. Starting the server sends no blockchain transaction.
+- **`session:server` — Start the merchant's session service.** It checks that the SDK's escrow matches the configured token, Permit2, network, and signing domains, then listens on `SESSION_PORT`. Leave it running while using commands that contact the server. It logs each completed HTTP request, including 402 challenges and successful 200 responses. Starting the server sends no blockchain transaction. **Local files:** Loads `server.json` at startup, holds `server.lock`, and persists session updates to `server.json` while handling requests.
 
-- **`session:inspect` — See the current setup and saved channel.** It reads the payer's token balance, Permit2 allowance, escrow details, channel state, most recent saved receipt, and any unresolved operation. Addresses are displayed in Base58. It reads TRON and the local journal directly, so the session server does not need to be running. It signs nothing and sends no blockchain transaction.
+- **`session:inspect` — See the current setup and saved channel.** It reads the payer's token balance, Permit2 allowance, escrow details, channel state, most recent saved receipt, and any unresolved operation. Addresses are displayed in Base58. It reads TRON and the local journal directly, so the session server does not need to be running. It signs nothing and sends no blockchain transaction. **Local files:** Reads the channel ID, pending operation, and latest saved receipt from `client.json`. Changes neither journal and does not read the live server accounting in `server.json`.
 
-- **`session:challenge` — Check what the server wants before agreeing to pay.** It makes an unpaid request to `/session`, expects HTTP 402, and validates the network, token, merchant, SDK escrow, Permit2, credential type, price, and expiry. It prints those terms without signing, opening a channel, or transferring tokens. The session server must be running; a logged 402 is expected for this command.
+- **`session:challenge` — Check what the server wants before agreeing to pay.** It makes an unpaid request to `/session`, expects HTTP 402, and validates the network, token, merchant, SDK escrow, Permit2, credential type, price, and expiry. It prints those terms without signing, opening a channel, or transferring tokens. The session server must be running; a logged 402 is expected for this command. **Local files:** Loads `client.json` at startup. This unpaid check changes neither journal's session accounting.
 
 #### Approve token access and open a channel
 
-- **`session:approve` — Give Permit2 permission to move tokens for session funding.** It calls the token contract's `approve` with `TRON_PERMIT2_ADDRESS` and sets the allowance to exactly `SESSION_MAX_DEPOSIT_ATOMIC`, which is 2 USDT with the defaults. The allowance is stored in the token contract; Permit2's own nonce state and USDT balance do not change. The payer submits the approval transaction and pays its TRX/resource costs, but no tokens move into escrow yet. If the allowance already equals the target, no transaction is sent. If a different nonzero allowance exists, resolve pending operations and run `session:revoke` before approving again.
+- **`session:approve` — Give Permit2 permission to move tokens for session funding.** It calls the token contract's `approve` with `TRON_PERMIT2_ADDRESS` and sets the allowance to exactly `SESSION_MAX_DEPOSIT_ATOMIC`, which is 2 USDT with the defaults. The allowance is stored in the token contract; Permit2's own nonce state and USDT balance do not change. The payer submits the approval transaction and pays its TRX/resource costs, but no tokens move into escrow yet. If the allowance already equals the target, no transaction is sent. If a different nonzero allowance exists, resolve pending operations and run `session:revoke` before approving again. **Local files:** Reads `client.json`; if submitting an approval, saves the pending transaction and hash there, then clears the pending record after confirmation. Does not update `server.json`.
 
-- **`session:revoke` — Remove Permit2's remaining token allowance.** The payer sends a transaction setting that allowance to zero and pays its TRX/resource costs. This prevents further Permit2 funding until another approval is granted; it does not close a channel or refund tokens already in escrow. Charge and session share this token-to-Permit2 allowance, so resolve pending payments before changing it.
+- **`session:revoke` — Remove Permit2's remaining token allowance.** The payer sends a transaction setting that allowance to zero and pays its TRX/resource costs. This prevents further Permit2 funding until another approval is granted; it does not close a channel or refund tokens already in escrow. Charge and session share this token-to-Permit2 allowance, so resolve pending payments before changing it. **Local files:** Reads `client.json`; if submitting a revocation, journals the pending transaction and hash there, then clears it after confirmation. Does not update `server.json`.
 
-**`session:open` — Create a payment channel and deposit the payer's tokens into escrow.** It performs these steps:
+**`session:open` — Create a payment channel and deposit the payer's tokens into escrow.**
+
+**Local files:** Saves the channel ID and pending signed request in `client.json` before submission. The server journals funding and channel state in `server.json`; the client saves the successful receipt in `client.json`.
+
+It performs these steps:
 
 1. Makes an unpaid `POST /session`, receives the expected HTTP 402 challenge, and validates the server's session payment terms.
 2. Checks the escrow, payer's token balance, and Permit2 allowance.
@@ -544,35 +617,35 @@ The tokens are held in escrow; the merchant has received no payment yet. Opening
 
 #### Authorize spending and receive messages
 
-- **`session:voucher` — Sign permission for a higher total payment from the channel.** It raises the cumulative amount the merchant may collect without moving tokens yet. By default, it adds `SESSION_STREAM_UNITS` times `SESSION_UNIT_AMOUNT_ATOMIC`: 0.4 USDT with the defaults. `npm run session:voucher -- 600000` sets the authorized total to 0.6 USDT; it does not add 0.6 USDT to the previous total. The total must fit the channel deposit and `SESSION_MAX_CUMULATIVE_ATOMIC`. Later settlement can collect the authorized amount, even if some messages have not been consumed. The command sends no blockchain transaction.
+- **`session:voucher` — Sign permission for a higher total payment from the channel.** It raises the cumulative amount the merchant may collect without moving tokens yet. By default, it adds `SESSION_STREAM_UNITS` times `SESSION_UNIT_AMOUNT_ATOMIC`: 0.4 USDT with the defaults. `npm run session:voucher -- 600000` sets the authorized total to 0.6 USDT; it does not add 0.6 USDT to the previous total. The total must fit the channel deposit and `SESSION_MAX_CUMULATIVE_ATOMIC`. Later settlement can collect the authorized amount, even if some messages have not been consumed. The command sends no blockchain transaction. **Local files:** Saves the pending signed request and resulting receipt in `client.json`. The server saves the accepted cumulative amount and voucher signature in `server.json`; `spent` does not increase.
 
-- **`session:pay` — Request one paid message using existing authorized credit.** The server records a charge of `SESSION_UNIT_AMOUNT_ATOMIC` and returns the message and receipt. With the defaults, `spent` increases by 0.1 USDT. This uses credit already authorized by a voucher; it sends no blockchain transaction. If credit is insufficient, authorize a higher voucher first, adding a deposit if necessary.
+- **`session:pay` — Request one paid message using existing authorized credit.** The server records a charge of `SESSION_UNIT_AMOUNT_ATOMIC` and returns the message and receipt. With the defaults, `spent` increases by 0.1 USDT. This uses credit already authorized by a voucher; it sends no blockchain transaction. If credit is insufficient, authorize a higher voucher first, adding a deposit if necessary. **Local files:** Saves the pending request in `client.json`. The server persists the debit to `spent` and request records in `server.json` before sending content; the client then saves the updated receipt in `client.json`.
 
-- **`session:stream` — Request several paid messages in one streamed response.** The server attempts up to `SESSION_STREAM_UNITS` messages and charges one unit before delivering each message. If authorized credit runs out, the stream emits `payment-need-voucher` and stops delivering content. Check the final receipt for the actual amount spent; the HTTP response can still be 200. It sends no blockchain transaction.
+- **`session:stream` — Request several paid messages in one streamed response.** The server attempts up to `SESSION_STREAM_UNITS` messages and charges one unit before delivering each message. If authorized credit runs out, the stream emits `payment-need-voucher` and stops delivering content. Check the final receipt for the actual amount spent; the HTTP response can still be 200. It sends no blockchain transaction. **Local files:** Saves the pending request in `client.json`. Each message debit is persisted in `server.json` before that message is sent; the client saves the final receipt in `client.json`.
 
 #### Add funds and collect payments
 
-- **`session:topup` — Put more of the payer's tokens into the existing channel.** It adds `SESSION_TOP_UP_ATOMIC`, or an explicit amount such as `npm run session:topup -- 500000` to add 0.5 USDT. The payer signs a fresh channel-bound Permit2 funding permit; the relayer submits the escrow transaction and pays its TRX/resource costs. Escrow calls `TRON_PERMIT2_ADDRESS`; successful funding consumes the permit nonce and moves USDT directly from payer to escrow using the token allowance. Permit2 receives no USDT. This increases the deposit without raising the voucher or charging for a message. Total channel funding must stay within `SESSION_MAX_DEPOSIT_ATOMIC`, and the payer's token allowance to Permit2 must cover the additional deposit.
+- **`session:topup` — Put more of the payer's tokens into the existing channel.** It adds `SESSION_TOP_UP_ATOMIC`, or an explicit amount such as `npm run session:topup -- 500000` to add 0.5 USDT. The payer signs a fresh channel-bound Permit2 funding permit; the relayer submits the escrow transaction and pays its TRX/resource costs. Escrow calls `TRON_PERMIT2_ADDRESS`; successful funding consumes the permit nonce and moves USDT directly from payer to escrow using the token allowance. Permit2 receives no USDT. This increases the deposit without raising the voucher or charging for a message. Total channel funding must stay within `SESSION_MAX_DEPOSIT_ATOMIC`, and the payer's token allowance to Permit2 must cover the additional deposit. **Local files:** Saves the pending funding request and resulting receipt in `client.json`. The server persists the funding record and increased deposit in `server.json`; the spending authorization does not increase.
 
-- **`session:merge` — Add a deposit and authorize more spending together.** It adds the configured `SESSION_TOP_UP_ATOMIC` and raises the cumulative voucher in one server request. By default, that means 1 USDT of additional funding and 0.4 USDT of additional authorization. `npm run session:merge -- 1200000` still adds the configured top-up, but sets the authorized total to 1.2 USDT. Its funding uses a fresh channel-bound Permit2 permit, consumes that nonce on success, and moves the deposit directly from payer to escrow using the token allowance. `TRON_PERMIT2_ADDRESS` receives no USDT; the voucher increase itself does not change Permit2 state. The relayer submits the funding transaction and pays its TRX/resource costs; no message is charged by this command.
+- **`session:merge` — Add a deposit and authorize more spending together.** It adds the configured `SESSION_TOP_UP_ATOMIC` and raises the cumulative voucher in one server request. By default, that means 1 USDT of additional funding and 0.4 USDT of additional authorization. `npm run session:merge -- 1200000` still adds the configured top-up, but sets the authorized total to 1.2 USDT. Its funding uses a fresh channel-bound Permit2 permit, consumes that nonce on success, and moves the deposit directly from payer to escrow using the token allowance. `TRON_PERMIT2_ADDRESS` receives no USDT; the voucher increase itself does not change Permit2 state. The relayer submits the funding transaction and pays its TRX/resource costs; no message is charged by this command. **Local files:** Saves the pending request and resulting receipt in `client.json`. The server persists the funding record, increased deposit, and accepted voucher in `server.json`.
 
-- **`session:settle` — Transfer an authorized payment from escrow to the merchant while keeping the channel open.** It collects up to the highest accepted cumulative voucher, less anything already settled. For example, if the voucher total is 0.8 USDT and 0.3 USDT was settled earlier, the merchant receives another 0.5 USDT. The merchant signs the authorization, and the relayer submits the transaction and pays its TRX/resource costs. This is an operator command requiring `MPP_SECRET_KEY`; the voucher total can exceed the price of messages already consumed. If the accepted voucher has already been fully settled, it reports that there is nothing to settle.
+- **`session:settle` — Transfer an authorized payment from escrow to the merchant while keeping the channel open.** It collects up to the highest accepted cumulative voucher, less anything already settled. For example, if the voucher total is 0.8 USDT and 0.3 USDT was settled earlier, the merchant receives another 0.5 USDT. The merchant signs the authorization, and the relayer submits the transaction and pays its TRX/resource costs. This is an operator command requiring `MPP_SECRET_KEY`; the voucher total can exceed the price of messages already consumed. If the accepted voucher has already been fully settled, it reports that there is nothing to settle. **Local files:** Reads the saved channel ID from `client.json`. The server persists its settlement operation and confirmed accounting in `server.json`; this operator command does not replace the saved receipt in `client.json`.
 
-- **`session:close` — Finish the channel, pay the merchant, and refund the remainder to the payer.** The payer signs a final voucher through the SDK for the greater of delivered spend and the amount already settled. The merchant authorizes the close; the relayer submits the transaction and pays its TRX/resource costs. Escrow pays any additional amount owed, refunds the unsettled remainder to the payer, and finalizes the channel. For example, a 2-USDT deposit closed at 0.9 USDT refunds 1.1 USDT. Further service requires a new channel.
+- **`session:close` — Finish the channel, pay the merchant, and refund the remainder to the payer.** The payer signs a final voucher through the SDK for the greater of delivered spend and the amount already settled. The merchant authorizes the close; the relayer submits the transaction and pays its TRX/resource costs. Escrow pays any additional amount owed, refunds the unsettled remainder to the payer, and finalizes the channel. For example, a 2-USDT deposit closed at 0.9 USDT refunds 1.1 USDT. Further service requires a new channel. **Local files:** Saves the pending close request and resulting receipt in `client.json`. The server persists the close operation and finalized channel accounting in `server.json`.
 
 #### Check replay protection and recover uncertain results
 
-- **`session:replay` — Send the last successful signed request again to test duplicate handling.** It reuses the saved credential instead of creating a new Permit2 authorization. Replaying a paid request or opening request should return 409 without charging or depositing again; repeating a voucher update can return 200 without another charge. This is a deliberate test of a completed request, not the command for recovering an unresolved one.
+- **`session:replay` — Send the last successful signed request again to test duplicate handling.** It reuses the saved credential instead of creating a new Permit2 authorization. Replaying a paid request or opening request should return 409 without charging or depositing again; repeating a voucher update can return 200 without another charge. This is a deliberate test of a completed request, not the command for recovering an unresolved one. **Local files:** Reads the last successful request from `client.json` without rewriting it. The server checks saved request/funding records in its loaded `server.json` state to handle duplicates.
 
-- **`session:retry` — Continue an operation whose outcome is still unresolved.** For a pending server request, it resends the saved credential; for a payer transaction with a saved hash, it checks that transaction's confirmation. It does not create a second deposit or broadcast the payer transaction again. It needs a saved pending operation; an expired paid request or a submission with no known hash requires investigation before continuing.
+- **`session:retry` — Continue an operation whose outcome is still unresolved.** For a pending server request, it resends the saved credential; for a payer transaction with a saved hash, it checks that transaction's confirmation. It does not create a second deposit or broadcast the payer transaction again. It needs a saved pending operation; an expired paid request or a submission with no known hash requires investigation before continuing. **Local files:** Reads the pending request or payer transaction from `client.json` and updates or clears it as recovery progresses. An HTTP retry may also update `server.json`; checking a payer-transaction hash does not contact the server.
 
-- **`session:reconcile` — Ask the server to check its records against a known transaction's outcome.** It checks saved funding, settlement, or close information and can resolve accounting when confirmation is available. This operator command requires `MPP_SECRET_KEY`; it sends no blockchain transaction and does not deliver content. HTTP 200 means the check ran: inspect the returned operation and channel state to see whether recovery is complete. A funding recovery may still need `session:retry`; the built-in adapter cannot automatically confirm an external forced withdrawal in server accounting.
+- **`session:reconcile` — Ask the server to check its records against a known transaction's outcome.** It checks saved funding, settlement, or close information and can resolve accounting when confirmation is available. This operator command requires `MPP_SECRET_KEY`; it sends no blockchain transaction and does not deliver content. HTTP 200 means the check ran: inspect the returned operation and channel state to see whether recovery is complete. A funding recovery may still need `session:retry`; the built-in adapter cannot automatically confirm an external forced withdrawal in server accounting. **Local files:** Reads the channel ID and any pending funding credential from `client.json`. The server may update `server.json`; the client may clear an acknowledged pending request in `client.json`, but does not replace its saved receipt.
 
 #### Recover funds without a cooperative merchant
 
-- **`session:request-close` — Start the waiting period for the payer to recover unsettled funds.** The payer submits this transaction directly to escrow and pays its TRX/resource costs; no merchant authorization or running session server is required. It starts the contract's grace period and does not refund tokens yet. Read the close-request timestamp and grace period with `session:inspect` before attempting withdrawal.
+- **`session:request-close` — Start the waiting period for the payer to recover unsettled funds.** The payer submits this transaction directly to escrow and pays its TRX/resource costs; no merchant authorization or running session server is required. It starts the contract's grace period and does not refund tokens yet. Read the close-request timestamp and grace period with `session:inspect` before attempting withdrawal. **Local files:** Reads the channel ID from `client.json`, journals the pending payer transaction and hash there, and clears it after confirmation. Does not update `server.json`.
 
-- **`session:withdraw` — Recover the channel's unsettled remainder after the forced-close waiting period.** It requires a confirmed close request and an elapsed grace period. The payer submits the withdrawal transaction and pays its TRX/resource costs; escrow refunds the unsettled tokens to the original payer and finalizes the channel. It does not require the session server. The app simulates the call before broadcasting, so a withdrawal attempted too early is rejected without sending a transaction.
+- **`session:withdraw` — Recover the channel's unsettled remainder after the forced-close waiting period.** It requires a confirmed close request and an elapsed grace period. The payer submits the withdrawal transaction and pays its TRX/resource costs; escrow refunds the unsettled tokens to the original payer and finalizes the channel. It does not require the session server. The app simulates the call before broadcasting, so a withdrawal attempted too early is rejected without sending a transaction. **Local files:** Reads the channel ID from `client.json`, journals the pending payer transaction and hash there, and clears it after confirmation. Does not update `server.json`; server accounting may still appear open.
 
 ### Session recovery
 
@@ -586,6 +659,8 @@ Before closing the channel, stop the server and restart it with the same configu
 npm run session:server
 ```
 
+**Local files:** Loads `server.json` at startup, holds `server.lock`, and persists session updates to `server.json` while handling requests.
+
 Reloads the saved accounting and resumes service. Restarting itself transfers no USDT and submits no transaction. Continue the lifecycle and check that the channel, spending, and replay records are retained.
 
 #### Recover an uncertain operation
@@ -596,11 +671,15 @@ After a network failure or HTTP 503:
 npm run session:inspect
 ```
 
+**Local files:** Reads the channel ID, pending operation, and latest saved receipt from `client.json`. Changes neither journal and does not read the live server accounting in `server.json`.
+
 Reads the on-chain channel and local pending-operation information. No USDT moves.
 
 ```sh
 npm run session:retry
 ```
+
+**Local files:** Reads the pending request or payer transaction from `client.json` and updates or clears it as recovery progresses. An HTTP retry may also update `server.json`; checking a payer-transaction hash does not contact the server.
 
 Resumes the saved request or checks a saved payer-transaction hash. The wallet impact depends on the original operation: a pending open may complete its original payer-to-escrow deposit; a pending close may complete its original merchant payment and payer refund. Retry preserves the original authorization and does not create a second deposit. Checking a saved payer-transaction hash does not broadcast that transaction again.
 
@@ -609,6 +688,8 @@ If a paid request has expired, retry stops because content may already have been
 ```sh
 npm run session:reconcile
 ```
+
+**Local files:** Reads the channel ID and any pending funding credential from `client.json`. The server may update `server.json`; the client may clear an acknowledged pending request in `client.json`, but does not replace its saved receipt.
 
 Uses `MPP_SECRET_KEY` to ask the server to reconcile funding, settlement, or close information with confirmed transaction results. It broadcasts no transaction, transfers no USDT, and delivers no content. HTTP 200 means the check ran; inspect `state.operation` and `state.closed` to determine whether recovery is complete. Confirmed funding may still need `session:retry` to finish initializing accounting or accepting the voucher.
 
@@ -620,11 +701,15 @@ After completing the cooperative-close walkthrough, open a fresh channel. Keep e
 npm run session:approve
 ```
 
+**Local files:** Reads `client.json`; if submitting an approval, saves the pending transaction and hash there, then clears the pending record after confirmation. Does not update `server.json`.
+
 Sets the `TRON_PAYER_PRIVATE_KEY` wallet's allowance to `TRON_PERMIT2_ADDRESS` to 2 USDT, or skips if already equal. No USDT moves; the payer pays TRX/resource costs if a transaction is needed. If a different nonzero allowance remains, resolve pending operations, revoke it, then approve again.
 
 ```sh
 npm run session:open
 ```
+
+**Local files:** Saves the channel ID and pending signed request in `client.json` before submission. The server journals funding and channel state in `server.json`; the client saves the successful receipt in `client.json`.
 
 Creates a fresh channel and transfers **1 USDT from the `TRON_PAYER_PRIVATE_KEY` wallet to `TRON_SESSION_ESCROW_ADDRESS`**. The `TRON_RELAYER_PRIVATE_KEY` wallet submits funding and pays transaction costs. `TRON_RECIPIENT_ADDRESS` receives nothing.
 
@@ -632,11 +717,15 @@ Creates a fresh channel and transfers **1 USDT from the `TRON_PAYER_PRIVATE_KEY`
 npm run session:request-close
 ```
 
+**Local files:** Reads the channel ID from `client.json`, journals the pending payer transaction and hash there, and clears it after confirmation. Does not update `server.json`.
+
 The `TRON_PAYER_PRIVATE_KEY` wallet submits an on-chain close request directly to escrow and pays its TRX/resource costs. This starts the grace period; no USDT is refunded yet. No merchant signature or running session server is required for this command or withdrawal.
 
 ```sh
 npm run session:inspect
 ```
+
+**Local files:** Reads the channel ID, pending operation, and latest saved receipt from `client.json`. Changes neither journal and does not read the live server accounting in `server.json`.
 
 Reads the close-request timestamp and grace period without moving funds. Wait until the on-chain close-request timestamp plus the grace period has elapsed: 15 minutes for a 900-second deployment.
 
@@ -644,16 +733,22 @@ Reads the close-request timestamp and grace period without moving funds. Wait un
 npm run session:withdraw
 ```
 
+**Local files:** Reads the channel ID from `client.json`, journals the pending payer transaction and hash there, and clears it after confirmation. Does not update `server.json`; server accounting may still appear open.
+
 The payer submits withdrawal and pays its TRX/resource costs. If no settlement occurred in this fresh channel, **escrow gives 1 USDT back to the `TRON_PAYER_PRIVATE_KEY` wallet**, and `TRON_RECIPIENT_ADDRESS` receives 0 USDT. If the merchant settled during the grace period, only the remaining unsettled balance is refunded. A withdrawal attempted too early fails simulation before broadcast.
 
 ```sh
 npm run session:inspect
 ```
 
+**Local files:** Reads the channel ID, pending operation, and latest saved receipt from `client.json`. Changes neither journal and does not read the live server accounting in `server.json`.
+
 Reads the on-chain finalization without moving funds.
 
 ```sh
 npm run session:reconcile
 ```
+
+**Local files:** Reads the channel ID and any pending funding credential from `client.json`. The server may update `server.json`; the client may clear an acknowledged pending request in `client.json`, but does not replace its saved receipt.
 
 Checks server accounting without moving funds; this command needs the session server. The built-in adapter cannot automatically confirm an external forced withdrawal in server accounting, so on-chain finalization may coexist with server records that remain open. See [Session testing](docs/SESSION_TESTING.md) for recovery details and adapter limitations.
