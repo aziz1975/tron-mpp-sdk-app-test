@@ -228,6 +228,8 @@ Voucher updates, paid messages, and streaming do not consume Permit2 funding non
 
 Session commands load the app's `.env`. `SESSION_STATE_DIR` selects the journal directory; the default `.data/session` is relative to the directory where you run the app. In this repository, that is `/home/aziz/localrepos/blockchain-projects/tron-mpp-sdk-app-test/.data/session`. Both the server and client must retain their own journals between commands and restarts.
 
+These journals are local records, separate from on-chain state. The escrow contract tracks the channel's on-chain funding, settlement, and closure state and controls settlement and refunds; the USDT token contract records the escrow's token balance. The server journal also tracks off-chain information such as delivered-message spending and replay records, while the client journal supports request and transaction recovery. Blockchain transactions themselves are recorded on TRON.
+
 | File | Used by | Contents and write timing |
 | --- | --- | --- |
 | `.data/session/server.json` | Session server and SDK session manager | Channel totals (`deposit`, `acceptedCumulative`, `spent`, `settledOnChain`), accepted voucher signatures, request/replay records, funding records, and pending settlement/close operations. Loaded at server startup; updates are persisted as requests are processed. A message debit is saved before sending its content. |
